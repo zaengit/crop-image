@@ -14,7 +14,19 @@ const focusImage = document.querySelector<HTMLImageElement>('#focus-image')!
 const focusTarget = document.querySelector<HTMLButtonElement>('#focus-target')!
 const resetFocus = document.querySelector<HTMLButtonElement>('#reset-focus')!
 
+const MAX_WORKING_PIXELS = 12_000_000
+const MAX_WORKING_EDGE = 4096
+
 type Generated = { preset: SocialPreset; blob: Blob; url: string }
+type DecodedImage = {
+  rgba: Uint8ClampedArray
+  width: number
+  height: number
+  sourceWidth: number
+  sourceHeight: number
+  scaled: boolean
+}
+
 let generated: Generated[] = []
 let activeWorker: Worker | undefined
 let originalUrl: string | undefined
@@ -35,16 +47,41 @@ function replaceResults(next: Generated) {
   renderGrid()
 }
 
-async function decode(file: File) {
+function workingDimensions(width: number, height: number) {
+  const pixels = width * height
+  const scaleByPixels = pixels > MAX_WORKING_PIXELS ? Math.sqrt(MAX_WORKING_PIXELS / pixels) : 1
+  const longestEdge = Math.max(width, height)
+  const scaleByEdge = longestEdge > MAX_WORKING_EDGE ? MAX_WORKING_EDGE / longestEdge : 1
+  const scale = Math.min(1, scaleByPixels, scaleByEdge)
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+    scale,
+  }
+}
+
+async function decode(file: File): Promise<DecodedImage> {
   const bitmap = await createImageBitmap(file)
+  const sourceWidth = bitmap.width
+  const sourceHeight = bitmap.height
+  const target = workingDimensions(sourceWidth, sourceHeight)
   const canvas = document.createElement('canvas')
-  canvas.width = bitmap.width
-  canvas.height = bitmap.height
+  canvas.width = target.width
+  canvas.height = target.height
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!
-  ctx.drawImage(bitmap, 0, 0)
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(bitmap, 0, 0, target.width, target.height)
   bitmap.close()
-  const image = ctx.getImageData(0, 0, canvas.width, canvas.height)
-  return { rgba: image.data, width: canvas.width, height: canvas.height }
+  const image = ctx.getImageData(0, 0, target.width, target.height)
+  return {
+    rgba: image.data,
+    width: target.width,
+    height: target.height,
+    sourceWidth,
+    sourceHeight,
+    scaled: target.scale < 0.999,
+  }
 }
 
 function download(blob: Blob, filename: string) {
@@ -79,7 +116,7 @@ function setTarget(x: number, y: number) {
 function scheduleFocus(x: number, y: number) {
   setTarget(x, y)
   if (regenTimer) window.clearTimeout(regenTimer)
-  regenTimer = window.setTimeout(() => activeWorker?.postMessage({ type: 'focus', x, y }), 140)
+  regenTimer = window.setTimeout(() => activeWorker?.postMessage({ type: 'focus', x, y }), 180)
 }
 
 function focusFromPointer(event: PointerEvent) {
@@ -102,7 +139,14 @@ async function process(file: File) {
 
   try {
     const image = await decode(file)
-    status.textContent = 'Starting local AI…'
+    if (image.scaled) {
+      const sourceMp = (image.sourceWidth * image.sourceHeight / 1_000_000).toFixed(1)
+      const workingMp = (image.width * image.height / 1_000_000).toFixed(1)
+      status.textContent = `Optimized ${sourceMp} MP photo to ${workingMp} MP working image…`
+    } else {
+      status.textContent = 'Starting local AI…'
+    }
+
     const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })
     activeWorker = worker
 
