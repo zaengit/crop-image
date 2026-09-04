@@ -3,14 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Generate smart-cropped social media images locally in your browser." />
+    <meta name="description" content="Generate smart-cropped image sizes locally in your browser." />
     <title>Crop Image</title>
   </head>
   <body>
     <main class="app">
       <header class="hero">
         <p class="eyebrow">LOCAL • PRIVATE • WASM</p>
-        <h1>Upload once. Get every social size.</h1>
+        <h1>Upload once. Get every size you need.</h1>
         <p>Smart crop runs on your device. Your image never leaves the browser.</p>
       </header>
 
@@ -25,7 +25,7 @@
         <div class="focus-copy">
           <p class="eyebrow">FOCAL POINT</p>
           <h2>Fine-tune the smart crop</h2>
-          <p>Drag the target over the subject you want every social format to prioritize.</p>
+          <p>Drag the target over the subject you want every generated size to prioritize.</p>
           <button id="reset-focus" class="secondary" type="button">Use auto focus</button>
         </div>
         <div id="focus-stage" class="focus-stage">
@@ -38,7 +38,7 @@
         <div class="results-head">
           <div>
             <p class="eyebrow">GENERATED</p>
-            <h2>Social media sizes</h2>
+            <h2>Image sizes</h2>
           </div>
           <div class="output-controls" aria-label="Output settings">
             <label>
@@ -56,7 +56,67 @@
             <button id="download-all" class="secondary">Download ZIP</button>
           </div>
         </div>
+
+        <nav class="size-tabs" aria-label="Image size categories">
+          <button class="size-tab active" type="button" data-menu="social" aria-pressed="true">Social media</button>
+          <button class="size-tab" type="button" data-menu="passport" aria-pressed="false">Passport photo</button>
+          <button class="size-tab" type="button" data-menu="custom" aria-pressed="false">Custom</button>
+        </nav>
+
+        <section id="social-panel" class="menu-panel">
+          <div class="panel-heading">
+            <div>
+              <h3>Social media</h3>
+              <p>Ready-to-use sizes for popular social platforms.</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="passport-panel" class="menu-panel" hidden>
+          <div class="panel-heading">
+            <div>
+              <h3>Passport photo</h3>
+              <p>Portrait-focused 2 × 3, 3 × 4, and 4 × 6 outputs.</p>
+            </div>
+          </div>
+        </section>
+
+        <section id="custom-panel" class="menu-panel" hidden>
+          <div class="panel-heading">
+            <div>
+              <h3>Custom size</h3>
+              <p>Create any pixel size while keeping smart crop and your current focal point.</p>
+            </div>
+          </div>
+
+          <form id="custom-form" class="custom-form">
+            <label>
+              <span>Width</span>
+              <input id="custom-width" type="number" min="64" max="8192" value="1080" inputmode="numeric" required />
+            </label>
+            <label>
+              <span>Height</span>
+              <input id="custom-height" type="number" min="64" max="8192" value="1080" inputmode="numeric" required />
+            </label>
+            <label class="ratio-lock">
+              <input id="lock-ratio" type="checkbox" />
+              <span>Lock aspect ratio</span>
+            </label>
+            <div class="ratio-presets" aria-label="Quick aspect ratios">
+              <button type="button" data-ratio="1/1">1:1</button>
+              <button type="button" data-ratio="4/5">4:5</button>
+              <button type="button" data-ratio="9/16">9:16</button>
+              <button type="button" data-ratio="16/9">16:9</button>
+              <button type="button" data-ratio="2/3">2:3</button>
+              <button type="button" data-ratio="3/4">3:4</button>
+            </div>
+            <button class="primary custom-generate" type="submit">Generate custom size</button>
+            <small id="custom-error" class="form-error" aria-live="polite"></small>
+          </form>
+        </section>
+
         <div id="grid" class="grid"></div>
+        <p id="empty-state" class="empty-state" hidden>No sizes generated in this category yet.</p>
       </section>
     </main>
     <script type="module" src="/src/main.ts"></script>
