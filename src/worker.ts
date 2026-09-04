@@ -1,5 +1,6 @@
 /// <reference lib="webworker" />
 
+import { FilesetResolver, ImageSegmenter } from '@mediapipe/tasks-vision'
 import initWasm, { smart_crop_png } from './wasm/pkg/crop_image_wasm.js'
 import { detectFaces, type FocusRegion } from './ai'
 import { PASSPORT_PRESETS, SOCIAL_PRESETS, type ImagePreset } from './presets'
@@ -8,10 +9,15 @@ type OutputFormat = 'png' | 'jpeg' | 'webp'
 type Mode = { kind: 'focus'; x: number; y: number } | { kind: 'auto' }
 
 let wasmReady: Promise<unknown> | undefined
+let segmenterReady: Promise<ImageSegmenter> | undefined
+let segmenterCanvas: OffscreenCanvas | undefined
 let cachedRgba: Uint8ClampedArray | undefined
 let cachedWidth = 0
 let cachedHeight = 0
 let cachedFocus: FocusRegion[] = []
+let cachedPersonMask: Float32Array | undefined
+let passportRgba: Uint8ClampedArray | undefined
+let passportBackground = 'original'
 let generating = false
 let pendingMode: Mode | undefined
 let currentMode: Mode = { kind: 'auto' }
@@ -20,6 +26,25 @@ let outputQuality = 0.9
 const activePresets = new Map<string, ImagePreset>()
 
 function ensureWasm() { wasmReady ??= initWasm(); return wasmReady }
+
+function ensureSegmenter() {
+  segmenterReady ??= (async () => {
+    self.postMessage({ type: 'status', message: 'Loading local background remover…' })
+    const fileset = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm')
+    segmenterCanvas = new OffscreenCanvas(1, 1)
+    return ImageSegmenter.createFromOptions(fileset, {
+      baseOptions: {
+        modelAssetPath: new URL(`${import.meta.env.BASE_URL}models/selfie_segmenter.tflite`, self.location.origin).href,
+        delegate: 'CPU',
+      },
+      canvas: segmenterCanvas,
+      runningMode: 'IMAGE',
+      outputCategoryMask: false,
+      outputConfidenceMasks: true,
+    })
+  })()
+  return segmenterReady
+}
 
 function mimeFor(format: OutputFormat) {
   if (format === 'jpeg') return 'image/jpeg'
@@ -55,6 +80,65 @@ function postAutoFocusPoint() {
   self.postMessage({ type: 'auto-focus-point', x: point.x, y: point.y })
 }
 
+function parseHexColor(value: string) {
+  const hex = value.replace('#', '')
+  if (!/^[0-9a-fA-F]{6}$/.test(hex)) throw new Error('Invalid background color')
+  return {
+    r: Number.parseInt(hex.slice(0, 2), 16),
+    g: Number.parseInt(hex.slice(2, 4), 16),
+    b: Number.parseInt(hex.slice(4, 6), 16),
+  }
+}
+
+async function ensurePersonMask() {
+  if (cachedPersonMask) return cachedPersonMask
+  if (!cachedRgba) throw new Error('No image loaded')
+
+  const segmenter = await ensureSegmenter()
+  self.postMessage({ type: 'status', message: 'Separating the person from the background…' })
+
+  const canvas = new OffscreenCanvas(cachedWidth, cachedHeight)
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Unable to create segmentation canvas')
+  const source = new Uint8ClampedArray(cachedRgba)
+  ctx.putImageData(new ImageData(source, cachedWidth, cachedHeight), 0, 0)
+
+  const result = segmenter.segment(canvas)
+  try {
+    const mask = result.confidenceMasks?.[0]
+    if (!mask) throw new Error('Person segmentation did not return a confidence mask')
+    cachedPersonMask = new Float32Array(mask.getAsFloat32Array())
+    return cachedPersonMask
+  } finally {
+    result.close()
+  }
+}
+
+async function composePassportBackground(background: string) {
+  passportBackground = background
+  if (background === 'original') {
+    passportRgba = undefined
+    return
+  }
+  if (!cachedRgba) throw new Error('No image loaded')
+
+  const color = parseHexColor(background)
+  const mask = await ensurePersonMask()
+  if (mask.length !== cachedWidth * cachedHeight) throw new Error('Unexpected segmentation mask size')
+
+  const output = new Uint8ClampedArray(cachedRgba.length)
+  for (let i = 0; i < mask.length; i++) {
+    const alpha = Math.min(1, Math.max(0, mask[i]))
+    const inv = 1 - alpha
+    const p = i * 4
+    output[p] = Math.round(cachedRgba[p] * alpha + color.r * inv)
+    output[p + 1] = Math.round(cachedRgba[p + 1] * alpha + color.g * inv)
+    output[p + 2] = Math.round(cachedRgba[p + 2] * alpha + color.b * inv)
+    output[p + 3] = 255
+  }
+  passportRgba = output
+}
+
 async function encodeOutput(pngBytes: Uint8Array, width: number, height: number) {
   if (outputFormat === 'png') {
     return { bytes: pngBytes.slice().buffer, mime: 'image/png', extension: 'png' }
@@ -86,7 +170,6 @@ async function generatePresets(presets: ImagePreset[], manualFocus = currentManu
 
   const manualX = manualFocus ? manualFocus.x : -1
   const manualY = manualFocus ? manualFocus.y : -1
-  const wasmPixels = new Uint8Array(cachedRgba.buffer as ArrayBuffer, cachedRgba.byteOffset, cachedRgba.byteLength)
 
   self.postMessage({
     type: 'status',
@@ -99,6 +182,8 @@ async function generatePresets(presets: ImagePreset[], manualFocus = currentManu
 
   for (let i = 0; i < presets.length; i++) {
     const preset = presets[i]
+    const sourcePixels = preset.group === 'passport' && passportRgba ? passportRgba : cachedRgba
+    const wasmPixels = new Uint8Array(sourcePixels.buffer as ArrayBuffer, sourcePixels.byteOffset, sourcePixels.byteLength)
     const png = smart_crop_png(
       wasmPixels,
       cachedWidth,
@@ -152,6 +237,7 @@ self.onmessage = async (event: MessageEvent<
   | { type: 'auto' }
   | { type: 'settings'; format: OutputFormat; quality: number }
   | { type: 'passport' }
+  | { type: 'background'; value: string }
   | { type: 'custom'; preset: ImagePreset }
   | { type: 'remove-custom'; id: string }
 >) => {
@@ -183,6 +269,15 @@ self.onmessage = async (event: MessageEvent<
       return
     }
 
+    if (event.data.type === 'background') {
+      for (const preset of PASSPORT_PRESETS) activePresets.set(preset.id, preset)
+      await composePassportBackground(event.data.value)
+      self.postMessage({ type: 'background-ready', value: passportBackground })
+      await generatePresets(PASSPORT_PRESETS, currentManualFocus(), true)
+      self.postMessage({ type: 'done', manual: currentMode.kind === 'focus', format: outputFormat, quality: outputQuality })
+      return
+    }
+
     if (event.data.type === 'custom') {
       activePresets.set(event.data.preset.id, event.data.preset)
       await generatePresets([event.data.preset], currentManualFocus())
@@ -201,6 +296,9 @@ self.onmessage = async (event: MessageEvent<
     cachedHeight = event.data.height
     cachedRgba = new Uint8ClampedArray(event.data.rgba)
     cachedFocus = []
+    cachedPersonMask = undefined
+    passportRgba = undefined
+    passportBackground = 'original'
     pendingMode = undefined
     currentMode = { kind: 'auto' }
     activePresets.clear()
