@@ -18,7 +18,8 @@ let sessionPromise: Promise<ort.InferenceSession> | undefined
 function getSession() {
   if (!sessionPromise) {
     ort.env.wasm.numThreads = 1
-    sessionPromise = ort.InferenceSession.create('/models/version-RFB-320.onnx', {
+    const modelUrl = `${import.meta.env.BASE_URL}models/version-RFB-320.onnx`
+    sessionPromise = ort.InferenceSession.create(modelUrl, {
       executionProviders: ['wasm'],
       graphOptimizationLevel: 'all'
     })
