@@ -26,8 +26,10 @@ function mimeFor(format: OutputFormat) {
   return 'image/png'
 }
 
-function extensionFor(format: OutputFormat) {
-  return format === 'jpeg' ? 'jpg' : format
+function extensionFromMime(mime: string) {
+  if (mime === 'image/jpeg') return 'jpg'
+  if (mime === 'image/webp') return 'webp'
+  return 'png'
 }
 
 async function encodeOutput(pngBytes: Uint8Array, width: number, height: number) {
@@ -35,7 +37,8 @@ async function encodeOutput(pngBytes: Uint8Array, width: number, height: number)
     return { bytes: pngBytes.slice().buffer, mime: 'image/png', extension: 'png' }
   }
 
-  const bitmap = await createImageBitmap(new Blob([pngBytes], { type: 'image/png' }))
+  const sourceBuffer = pngBytes.slice().buffer
+  const bitmap = await createImageBitmap(new Blob([sourceBuffer], { type: 'image/png' }))
   try {
     const canvas = new OffscreenCanvas(width, height)
     const ctx = canvas.getContext('2d')
@@ -43,7 +46,8 @@ async function encodeOutput(pngBytes: Uint8Array, width: number, height: number)
     ctx.drawImage(bitmap, 0, 0)
     const blob = await canvas.convertToBlob({ type: mimeFor(outputFormat), quality: outputQuality })
     const bytes = await blob.arrayBuffer()
-    return { bytes, mime: blob.type || mimeFor(outputFormat), extension: extensionFor(outputFormat) }
+    const mime = blob.type || mimeFor(outputFormat)
+    return { bytes, mime, extension: extensionFromMime(mime) }
   } finally {
     bitmap.close()
   }
