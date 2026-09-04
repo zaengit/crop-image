@@ -1,6 +1,6 @@
 import './style.css'
 import { zipSync, strToU8 } from 'fflate'
-import type { SocialPreset } from './presets'
+import type { ImagePreset, PresetGroup } from './presets'
 
 const fileInput = document.querySelector<HTMLInputElement>('#file')!
 const pick = document.querySelector<HTMLButtonElement>('#pick')!
@@ -8,6 +8,7 @@ const dropzone = document.querySelector<HTMLElement>('#dropzone')!
 const status = document.querySelector<HTMLElement>('#status')!
 const results = document.querySelector<HTMLElement>('#results')!
 const grid = document.querySelector<HTMLElement>('#grid')!
+const emptyState = document.querySelector<HTMLElement>('#empty-state')!
 const downloadAll = document.querySelector<HTMLButtonElement>('#download-all')!
 const focusEditor = document.querySelector<HTMLElement>('#focus-editor')!
 const focusStage = document.querySelector<HTMLElement>('#focus-stage')!
@@ -18,12 +19,25 @@ const formatSelect = document.querySelector<HTMLSelectElement>('#format')!
 const qualityInput = document.querySelector<HTMLInputElement>('#quality')!
 const qualityValue = document.querySelector<HTMLElement>('#quality-value')!
 const qualityWrap = document.querySelector<HTMLElement>('#quality-wrap')!
+const menuButtons = [...document.querySelectorAll<HTMLButtonElement>('[data-menu]')]
+const socialPanel = document.querySelector<HTMLElement>('#social-panel')!
+const passportPanel = document.querySelector<HTMLElement>('#passport-panel')!
+const customPanel = document.querySelector<HTMLElement>('#custom-panel')!
+const customForm = document.querySelector<HTMLFormElement>('#custom-form')!
+const customWidth = document.querySelector<HTMLInputElement>('#custom-width')!
+const customHeight = document.querySelector<HTMLInputElement>('#custom-height')!
+const lockRatio = document.querySelector<HTMLInputElement>('#lock-ratio')!
+const customError = document.querySelector<HTMLElement>('#custom-error')!
+const ratioButtons = [...document.querySelectorAll<HTMLButtonElement>('[data-ratio]')]
 
 const MAX_WORKING_PIXELS = 12_000_000
 const MAX_WORKING_EDGE = 4096
+const MAX_CUSTOM_PIXELS = 32_000_000
+const MIN_CUSTOM_EDGE = 64
+const MAX_CUSTOM_EDGE = 8192
 
 type OutputFormat = 'png' | 'jpeg' | 'webp'
-type Generated = { preset: SocialPreset; blob: Blob; url: string; extension: string; mime: string }
+type Generated = { preset: ImagePreset; blob: Blob; url: string; extension: string; mime: string }
 type DecodedImage = {
   rgba: Uint8ClampedArray
   width: number
@@ -39,6 +53,10 @@ let originalUrl: string | undefined
 let dragging = false
 let regenTimer: number | undefined
 let currentFileName = 'crop-image'
+let activeMenu: PresetGroup = 'social'
+let passportRequested = false
+let customSequence = 0
+let lockedRatio = 1
 
 function currentFormat() { return formatSelect.value as OutputFormat }
 function currentQuality() { return Number(qualityInput.value) / 100 }
@@ -47,13 +65,17 @@ function revokeResults() {
   for (const item of generated) URL.revokeObjectURL(item.url)
   generated = []
   grid.replaceChildren()
+  renderGrid()
 }
 
-function replaceResults(next: Generated) {
+function upsertResult(next: Generated) {
   const existingIndex = generated.findIndex((item) => item.preset.id === next.preset.id)
-  if (existingIndex >= 0) URL.revokeObjectURL(generated[existingIndex].url)
-  if (existingIndex >= 0) generated[existingIndex] = next
-  else generated.push(next)
+  if (existingIndex >= 0) {
+    URL.revokeObjectURL(generated[existingIndex].url)
+    generated[existingIndex] = next
+  } else {
+    generated.push(next)
+  }
   renderGrid()
 }
 
@@ -108,6 +130,16 @@ function humanBytes(bytes: number) {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 
+function removeCustom(id: string) {
+  const index = generated.findIndex((item) => item.preset.id === id)
+  if (index < 0) return
+  URL.revokeObjectURL(generated[index].url)
+  generated.splice(index, 1)
+  activeWorker?.postMessage({ type: 'remove-custom', id })
+  renderGrid()
+  downloadAll.disabled = generated.length === 0
+}
+
 function createCard(item: Generated) {
   const card = document.createElement('article')
   card.className = 'card'
@@ -124,19 +156,38 @@ function createCard(item: Generated) {
 
   const body = document.createElement('div')
   body.className = 'card-body'
-  body.innerHTML = `<div><strong>${item.preset.platform}</strong><span>${item.preset.label}</span></div><small>${item.preset.width} × ${item.preset.height} · ${item.extension.toUpperCase()} · ${humanBytes(item.blob.size)}</small>`
+  const meta = document.createElement('div')
+  meta.className = 'card-meta'
+  meta.innerHTML = `<strong>${item.preset.platform}</strong><span>${item.preset.label}</span>`
+  const details = document.createElement('small')
+  details.textContent = `${item.preset.width} × ${item.preset.height} · ${item.extension.toUpperCase()} · ${humanBytes(item.blob.size)}`
+  body.append(meta, details)
 
+  const actions = document.createElement('div')
+  actions.className = 'card-actions'
   const button = document.createElement('button')
   button.textContent = 'Download'
   button.addEventListener('click', () => download(item.blob, `${item.preset.id}.${item.extension}`))
-  body.append(button)
+  actions.append(button)
 
+  if (item.preset.group === 'custom') {
+    const remove = document.createElement('button')
+    remove.className = 'remove-button'
+    remove.type = 'button'
+    remove.textContent = 'Delete'
+    remove.addEventListener('click', () => removeCustom(item.preset.id))
+    actions.append(remove)
+  }
+
+  body.append(actions)
   card.append(thumb, body)
   return card
 }
 
 function renderGrid() {
-  grid.replaceChildren(...generated.map(createCard))
+  const visible = generated.filter((item) => item.preset.group === activeMenu)
+  grid.replaceChildren(...visible.map(createCard))
+  emptyState.hidden = visible.length > 0 || activeMenu === 'passport' || activeMenu === 'social'
 }
 
 function renderedImageBox() {
@@ -201,6 +252,12 @@ function regenerateWithSettings() {
   activeWorker.postMessage({ type: 'settings', format: currentFormat(), quality: currentQuality() })
 }
 
+function folderFor(group: PresetGroup) {
+  if (group === 'passport') return 'passport-photo'
+  if (group === 'custom') return 'custom'
+  return 'social-media'
+}
+
 async function downloadZip() {
   if (!generated.length || downloadAll.disabled) return
   downloadAll.disabled = true
@@ -208,7 +265,7 @@ async function downloadZip() {
   try {
     const files: Record<string, Uint8Array> = {}
     for (const item of generated) {
-      files[`${item.preset.platform.toLowerCase()}/${item.preset.id}.${item.extension}`] = new Uint8Array(await item.blob.arrayBuffer())
+      files[`${folderFor(item.preset.group)}/${item.preset.id}.${item.extension}`] = new Uint8Array(await item.blob.arrayBuffer())
     }
     files['manifest.json'] = strToU8(JSON.stringify({
       generatedAt: new Date().toISOString(),
@@ -217,22 +274,63 @@ async function downloadZip() {
       quality: currentFormat() === 'png' ? null : Number(qualityInput.value),
       files: generated.map((item) => ({
         id: item.preset.id,
-        platform: item.preset.platform,
+        group: item.preset.group,
         label: item.preset.label,
         width: item.preset.width,
         height: item.preset.height,
-        filename: `${item.preset.platform.toLowerCase()}/${item.preset.id}.${item.extension}`,
+        filename: `${folderFor(item.preset.group)}/${item.preset.id}.${item.extension}`,
       })),
     }, null, 2))
     const zipped = zipSync(files, { level: 6 })
-    const zipBuffer = zipped.slice().buffer
-    download(new Blob([zipBuffer], { type: 'application/zip' }), 'social-media-crops.zip')
+    download(new Blob([zipped.slice().buffer], { type: 'application/zip' }), 'image-sizes.zip')
     status.textContent = `Done — ZIP contains ${generated.length} images.`
   } catch (error) {
     status.textContent = `Error creating ZIP: ${error instanceof Error ? error.message : String(error)}`
   } finally {
-    downloadAll.disabled = false
+    downloadAll.disabled = generated.length === 0
   }
+}
+
+function setMenu(menu: PresetGroup) {
+  activeMenu = menu
+  for (const button of menuButtons) {
+    const active = button.dataset.menu === menu
+    button.classList.toggle('active', active)
+    button.setAttribute('aria-pressed', String(active))
+  }
+  socialPanel.hidden = menu !== 'social'
+  passportPanel.hidden = menu !== 'passport'
+  customPanel.hidden = menu !== 'custom'
+  renderGrid()
+
+  if (menu === 'passport' && activeWorker && !passportRequested) {
+    passportRequested = true
+    status.textContent = 'Generating passport photo sizes…'
+    downloadAll.disabled = true
+    activeWorker.postMessage({ type: 'passport' })
+  }
+}
+
+function customDimensions() {
+  const width = Math.round(Number(customWidth.value))
+  const height = Math.round(Number(customHeight.value))
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return { error: 'Enter a valid width and height.' }
+  if (width < MIN_CUSTOM_EDGE || height < MIN_CUSTOM_EDGE) return { error: `Minimum size is ${MIN_CUSTOM_EDGE} × ${MIN_CUSTOM_EDGE} px.` }
+  if (width > MAX_CUSTOM_EDGE || height > MAX_CUSTOM_EDGE) return { error: `Maximum edge is ${MAX_CUSTOM_EDGE} px.` }
+  if (width * height > MAX_CUSTOM_PIXELS) return { error: 'Custom output is limited to 32 megapixels.' }
+  return { width, height }
+}
+
+function syncLockedHeight() {
+  if (!lockRatio.checked || !lockedRatio) return
+  const width = Math.max(MIN_CUSTOM_EDGE, Math.min(MAX_CUSTOM_EDGE, Math.round(Number(customWidth.value) || MIN_CUSTOM_EDGE)))
+  customHeight.value = String(Math.max(MIN_CUSTOM_EDGE, Math.min(MAX_CUSTOM_EDGE, Math.round(width / lockedRatio))))
+}
+
+function syncLockedWidth() {
+  if (!lockRatio.checked || !lockedRatio) return
+  const height = Math.max(MIN_CUSTOM_EDGE, Math.min(MAX_CUSTOM_EDGE, Math.round(Number(customHeight.value) || MIN_CUSTOM_EDGE)))
+  customWidth.value = String(Math.max(MIN_CUSTOM_EDGE, Math.min(MAX_CUSTOM_EDGE, Math.round(height * lockedRatio))))
 }
 
 async function process(file: File) {
@@ -243,6 +341,10 @@ async function process(file: File) {
 
   activeWorker?.terminate()
   revokeResults()
+  passportRequested = false
+  customSequence = 0
+  activeMenu = 'social'
+  setMenu('social')
   currentFileName = file.name
   results.hidden = false
   focusEditor.hidden = false
@@ -262,7 +364,7 @@ async function process(file: File) {
       const workingMp = (image.width * image.height / 1_000_000).toFixed(1)
       status.textContent = `Optimized ${sourceMp} MP photo to ${workingMp} MP working image…`
     } else {
-      status.textContent = 'Starting local AI…'
+      status.textContent = 'Starting local smart crop…'
     }
 
     const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })
@@ -274,20 +376,18 @@ async function process(file: File) {
       if (message.type === 'auto-focus-point') setTarget(message.x, message.y)
       if (message.type === 'result') {
         const blob = new Blob([message.bytes], { type: message.mime })
-        const item: Generated = {
-          preset: message.preset as SocialPreset,
+        upsertResult({
+          preset: message.preset as ImagePreset,
           blob,
           url: URL.createObjectURL(blob),
           extension: message.extension,
           mime: message.mime,
-        }
-        if (message.replace) replaceResults(item)
-        else { generated.push(item); renderGrid() }
+        })
         status.textContent = `Generated ${message.index + 1} / ${message.total}`
       }
       if (message.type === 'done') {
         status.textContent = message.manual
-          ? 'Done — manual focus applied to every format.'
+          ? 'Done — manual focus applied to generated sizes.'
           : `Done — ${generated.length} images generated locally.`
         pick.disabled = false
         downloadAll.disabled = generated.length === 0
@@ -333,6 +433,50 @@ downloadAll.addEventListener('click', downloadZip)
 formatSelect.addEventListener('change', regenerateWithSettings)
 qualityInput.addEventListener('input', updateQualityUi)
 qualityInput.addEventListener('change', regenerateWithSettings)
+menuButtons.forEach((button) => button.addEventListener('click', () => setMenu(button.dataset.menu as PresetGroup)))
+
+customForm.addEventListener('submit', (event) => {
+  event.preventDefault()
+  customError.textContent = ''
+  if (!activeWorker) {
+    customError.textContent = 'Choose an image first.'
+    return
+  }
+  const dimensions = customDimensions()
+  if ('error' in dimensions) {
+    customError.textContent = dimensions.error ?? 'Invalid custom size.'
+    return
+  }
+  customSequence += 1
+  const preset: ImagePreset = {
+    id: `custom-${dimensions.width}x${dimensions.height}-${customSequence}`,
+    group: 'custom',
+    platform: 'Custom',
+    label: `${dimensions.width} × ${dimensions.height}`,
+    width: dimensions.width!,
+    height: dimensions.height!,
+    facePadding: 0.12,
+  }
+  status.textContent = `Generating ${preset.width} × ${preset.height}…`
+  downloadAll.disabled = true
+  activeWorker.postMessage({ type: 'custom', preset })
+})
+
+lockRatio.addEventListener('change', () => {
+  if (lockRatio.checked) {
+    const width = Number(customWidth.value) || 1
+    const height = Number(customHeight.value) || 1
+    lockedRatio = width / height
+  }
+})
+customWidth.addEventListener('input', syncLockedHeight)
+customHeight.addEventListener('input', syncLockedWidth)
+ratioButtons.forEach((button) => button.addEventListener('click', () => {
+  const [w, h] = (button.dataset.ratio ?? '1/1').split('/').map(Number)
+  lockedRatio = w / h
+  lockRatio.checked = true
+  syncLockedHeight()
+}))
 
 focusStage.addEventListener('pointerdown', (event) => {
   dragging = true
@@ -352,4 +496,5 @@ focusImage.addEventListener('load', repositionTarget)
 window.addEventListener('resize', repositionTarget)
 
 updateQualityUi()
+setMenu('social')
 downloadAll.disabled = true
