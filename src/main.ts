@@ -271,6 +271,7 @@ async function process(file: File) {
     worker.onmessage = (event) => {
       const message = event.data
       if (message.type === 'status') status.textContent = message.message
+      if (message.type === 'auto-focus-point') setTarget(message.x, message.y)
       if (message.type === 'result') {
         const blob = new Blob([message.bytes], { type: message.mime })
         const item: Generated = {
@@ -343,8 +344,8 @@ focusStage.addEventListener('pointerup', (event) => { dragging = false; focusSta
 focusStage.addEventListener('pointercancel', () => { dragging = false })
 resetFocus.addEventListener('click', () => {
   if (regenTimer) window.clearTimeout(regenTimer)
-  setTarget(0.5, 0.5)
   downloadAll.disabled = true
+  status.textContent = 'Restoring auto focus…'
   activeWorker?.postMessage({ type: 'auto' })
 })
 focusImage.addEventListener('load', repositionTarget)
