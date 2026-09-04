@@ -47,8 +47,11 @@ jobs:
       - name: Rust tests
         run: cargo test --manifest-path crates/crop-image-wasm/Cargo.toml
 
+      - name: Build WASM bindings
+        run: npm run wasm:build
+
       - name: TypeScript check
         run: npm run typecheck
 
       - name: Build application
-        run: npm run build
+        run: npm run build:web
