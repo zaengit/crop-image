@@ -120,24 +120,53 @@ function renderGrid() {
   grid.replaceChildren(...generated.map(createCard))
 }
 
+function renderedImageBox() {
+  const stageWidth = focusStage.clientWidth
+  const stageHeight = focusStage.clientHeight
+  if (!focusImage.naturalWidth || !focusImage.naturalHeight || !stageWidth || !stageHeight) {
+    return { left: 0, top: 0, width: stageWidth, height: stageHeight }
+  }
+  const imageRatio = focusImage.naturalWidth / focusImage.naturalHeight
+  const stageRatio = stageWidth / stageHeight
+  if (imageRatio > stageRatio) {
+    const height = stageWidth / imageRatio
+    return { left: 0, top: (stageHeight - height) / 2, width: stageWidth, height }
+  }
+  const width = stageHeight * imageRatio
+  return { left: (stageWidth - width) / 2, top: 0, width, height: stageHeight }
+}
+
 function setTarget(x: number, y: number) {
   const nx = Math.min(1, Math.max(0, x))
   const ny = Math.min(1, Math.max(0, y))
-  focusTarget.style.left = `${nx * 100}%`
-  focusTarget.style.top = `${ny * 100}%`
+  const box = renderedImageBox()
+  focusTarget.style.left = `${box.left + nx * box.width}px`
+  focusTarget.style.top = `${box.top + ny * box.height}px`
   focusTarget.dataset.x = String(nx)
   focusTarget.dataset.y = String(ny)
 }
 
+function repositionTarget() {
+  setTarget(Number(focusTarget.dataset.x ?? 0.5), Number(focusTarget.dataset.y ?? 0.5))
+}
+
 function scheduleFocus(x: number, y: number) {
-  setTarget(x, y)
+  const nx = Math.min(1, Math.max(0, x))
+  const ny = Math.min(1, Math.max(0, y))
+  setTarget(nx, ny)
   if (regenTimer) window.clearTimeout(regenTimer)
-  regenTimer = window.setTimeout(() => activeWorker?.postMessage({ type: 'focus', x, y }), 180)
+  regenTimer = window.setTimeout(() => {
+    downloadAll.disabled = true
+    activeWorker?.postMessage({ type: 'focus', x: nx, y: ny })
+  }, 180)
 }
 
 function focusFromPointer(event: PointerEvent) {
-  const rect = focusStage.getBoundingClientRect()
-  scheduleFocus((event.clientX - rect.left) / rect.width, (event.clientY - rect.top) / rect.height)
+  const stageRect = focusStage.getBoundingClientRect()
+  const box = renderedImageBox()
+  const x = (event.clientX - stageRect.left - box.left) / Math.max(1, box.width)
+  const y = (event.clientY - stageRect.top - box.top) / Math.max(1, box.height)
+  scheduleFocus(x, y)
 }
 
 function updateQualityUi() {
@@ -148,12 +177,13 @@ function updateQualityUi() {
 function regenerateWithSettings() {
   updateQualityUi()
   if (!activeWorker) return
+  downloadAll.disabled = true
   status.textContent = 'Updating output settings…'
   activeWorker.postMessage({ type: 'settings', format: currentFormat(), quality: currentQuality() })
 }
 
 async function downloadZip() {
-  if (!generated.length) return
+  if (!generated.length || downloadAll.disabled) return
   downloadAll.disabled = true
   status.textContent = 'Creating ZIP locally…'
   try {
@@ -176,7 +206,8 @@ async function downloadZip() {
       })),
     }, null, 2))
     const zipped = zipSync(files, { level: 6 })
-    download(new Blob([zipped], { type: 'application/zip' }), 'social-media-crops.zip')
+    const zipBuffer = zipped.slice().buffer
+    download(new Blob([zipBuffer], { type: 'application/zip' }), 'social-media-crops.zip')
     status.textContent = `Done — ZIP contains ${generated.length} images.`
   } catch (error) {
     status.textContent = `Error creating ZIP: ${error instanceof Error ? error.message : String(error)}`
@@ -198,6 +229,7 @@ async function process(file: File) {
   focusEditor.hidden = false
   status.textContent = 'Reading image…'
   pick.disabled = true
+  downloadAll.disabled = true
 
   if (originalUrl) URL.revokeObjectURL(originalUrl)
   originalUrl = URL.createObjectURL(file)
@@ -238,15 +270,18 @@ async function process(file: File) {
           ? 'Done — manual focus applied to every format.'
           : `Done — ${generated.length} images generated locally.`
         pick.disabled = false
+        downloadAll.disabled = generated.length === 0
       }
       if (message.type === 'error') {
         status.textContent = `Error: ${message.message}`
         pick.disabled = false
+        downloadAll.disabled = generated.length === 0
       }
     }
     worker.onerror = (event) => {
       status.textContent = `Error: ${event.message}`
       pick.disabled = false
+      downloadAll.disabled = generated.length === 0
     }
     worker.postMessage({
       type: 'load',
@@ -259,6 +294,7 @@ async function process(file: File) {
   } catch (error) {
     status.textContent = `Error: ${error instanceof Error ? error.message : String(error)}`
     pick.disabled = false
+    downloadAll.disabled = generated.length === 0
   }
 }
 
@@ -289,7 +325,11 @@ focusStage.addEventListener('pointercancel', () => { dragging = false })
 resetFocus.addEventListener('click', () => {
   if (regenTimer) window.clearTimeout(regenTimer)
   setTarget(0.5, 0.5)
+  downloadAll.disabled = true
   activeWorker?.postMessage({ type: 'auto' })
 })
+focusImage.addEventListener('load', repositionTarget)
+window.addEventListener('resize', repositionTarget)
 
 updateQualityUi()
+downloadAll.disabled = true
