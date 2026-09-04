@@ -73,11 +73,29 @@
         </section>
 
         <section id="passport-panel" class="menu-panel" hidden>
-          <div class="panel-heading">
+          <div class="panel-heading passport-heading">
             <div>
               <h3>Passport photo</h3>
               <p>Portrait-focused 2 × 3, 3 × 4, and 4 × 6 outputs.</p>
             </div>
+          </div>
+
+          <div class="background-control">
+            <div>
+              <strong>Background</strong>
+              <p>Keep the original scene or replace it with a solid color.</p>
+            </div>
+            <div class="background-options" role="group" aria-label="Passport photo background">
+              <button class="background-option active" type="button" data-background="original" aria-pressed="true">Original</button>
+              <button class="background-option" type="button" data-background="#ffffff" aria-pressed="false"><span class="color-dot white"></span>White</button>
+              <button class="background-option" type="button" data-background="#d71920" aria-pressed="false"><span class="color-dot red"></span>Red</button>
+              <button class="background-option" type="button" data-background="#1769d2" aria-pressed="false"><span class="color-dot blue"></span>Blue</button>
+              <label class="custom-color-option">
+                <span>Custom</span>
+                <input id="passport-background-color" type="color" value="#e5e7eb" aria-label="Custom passport background color" />
+              </label>
+            </div>
+            <small id="background-status" class="background-status" aria-live="polite"></small>
           </div>
         </section>
 
