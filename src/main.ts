@@ -153,7 +153,7 @@ focusStage.addEventListener('pointermove', (event) => { if (dragging) focusFromP
 focusStage.addEventListener('pointerup', (event) => { dragging = false; focusStage.releasePointerCapture(event.pointerId); focusFromPointer(event) })
 focusStage.addEventListener('pointercancel', () => { dragging = false })
 resetFocus.addEventListener('click', () => {
+  if (regenTimer) window.clearTimeout(regenTimer)
   setTarget(0.5, 0.5)
-  activeWorker?.postMessage({ type: 'load-auto' })
-  status.textContent = 'Auto focus reset requires re-upload in this MVP.'
+  activeWorker?.postMessage({ type: 'auto' })
 })
