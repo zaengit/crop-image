@@ -9,6 +9,8 @@ let cachedRgba: Uint8ClampedArray | undefined
 let cachedWidth = 0
 let cachedHeight = 0
 let cachedFocus: FocusRegion[] = []
+let generating = false
+let pendingMode: { kind: 'focus'; x: number; y: number } | { kind: 'auto' } | undefined
 
 function ensureWasm() { wasmReady ??= initWasm(); return wasmReady }
 
@@ -17,6 +19,7 @@ async function generate(manualFocus?: { x: number; y: number }, replace = false)
   const manualX = manualFocus ? manualFocus.x : -1
   const manualY = manualFocus ? manualFocus.y : -1
   self.postMessage({ type: 'status', message: manualFocus ? 'Applying manual focus…' : cachedFocus.length ? `Found ${cachedFocus.length} face${cachedFocus.length > 1 ? 's' : ''}. Cropping…` : 'Using saliency smart crop…' })
+
   for (let i = 0; i < SOCIAL_PRESETS.length; i++) {
     const preset = SOCIAL_PRESETS[i]
     const png = smart_crop_png(
@@ -38,6 +41,23 @@ async function generate(manualFocus?: { x: number; y: number }, replace = false)
   self.postMessage({ type: 'done', manual: Boolean(manualFocus) })
 }
 
+async function runQueuedGeneration(mode: { kind: 'focus'; x: number; y: number } | { kind: 'auto' }) {
+  pendingMode = mode
+  if (generating) return
+
+  generating = true
+  try {
+    while (pendingMode) {
+      const next = pendingMode
+      pendingMode = undefined
+      if (next.kind === 'focus') await generate({ x: next.x, y: next.y }, true)
+      else await generate(undefined, true)
+    }
+  } finally {
+    generating = false
+  }
+}
+
 self.onmessage = async (event: MessageEvent<
   | { type: 'load'; rgba: ArrayBuffer; width: number; height: number }
   | { type: 'focus'; x: number; y: number }
@@ -46,11 +66,11 @@ self.onmessage = async (event: MessageEvent<
   try {
     await ensureWasm()
     if (event.data.type === 'focus') {
-      await generate({ x: event.data.x, y: event.data.y }, true)
+      await runQueuedGeneration({ kind: 'focus', x: event.data.x, y: event.data.y })
       return
     }
     if (event.data.type === 'auto') {
-      await generate(undefined, true)
+      await runQueuedGeneration({ kind: 'auto' })
       return
     }
 
@@ -58,6 +78,7 @@ self.onmessage = async (event: MessageEvent<
     cachedHeight = event.data.height
     cachedRgba = new Uint8ClampedArray(event.data.rgba)
     cachedFocus = []
+    pendingMode = undefined
     self.postMessage({ type: 'status', message: 'Finding the subject…' })
     try { cachedFocus = await detectFaces(cachedRgba, cachedWidth, cachedHeight) }
     catch (error) { console.warn('Face detector unavailable; using Rust saliency fallback.', error) }
