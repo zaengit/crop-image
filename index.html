@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Generate smart-cropped social media images locally in your browser." />
+    <title>Crop Image</title>
+  </head>
+  <body>
+    <main class="app">
+      <header class="hero">
+        <p class="eyebrow">LOCAL • PRIVATE • WASM</p>
+        <h1>Upload once. Get every social size.</h1>
+        <p>Smart crop runs on your device using ONNX Runtime WASM + Rust WASM. Your image never leaves the browser.</p>
+      </header>
+      <section class="upload-card" id="dropzone">
+        <input id="file" type="file" accept="image/*" hidden />
+        <button id="pick" class="primary">Choose image</button>
+        <p>or drop an image here</p>
+        <small id="status">Ready</small>
+      </section>
+      <section id="results" class="results" hidden>
+        <div class="results-head">
+          <div><p class="eyebrow">GENERATED</p><h2>Social media sizes</h2></div>
+          <button id="download-all" class="secondary">Download all</button>
+        </div>
+        <div id="grid" class="grid"></div>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

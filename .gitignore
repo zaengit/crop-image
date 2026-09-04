@@ -1,0 +1,8 @@
+node_modules/
+dist/
+src/wasm/pkg/
+target/
+crates/crop-image-wasm/target/
+public/models/*.onnx
+!.gitkeep
+.DS_Store
