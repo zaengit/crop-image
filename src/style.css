@@ -22,7 +22,7 @@ button:disabled { opacity: .5; cursor: wait; }
 .focus-stage { position: relative; background: #0f172a; border-radius: 24px; overflow: hidden; min-height: 260px; max-height: 520px; display: grid; place-items: center; touch-action: none; user-select: none; cursor: crosshair; }
 .focus-stage img { display: none; width: 100%; height: 100%; max-height: 520px; object-fit: contain; pointer-events: none; }
 .focus-stage img[src]:not([src=""]) { display: block; }
-.focus-target { position: absolute; width: 44px; height: 44px; border: 2px solid white; border-radius: 50%; transform: translate(-50%, -50%); background: rgba(15,23,42,.3); box-shadow: 0 0 0 5px rgba(255,255,255,.2), 0 8px 28px rgba(15,23,42,.35); padding: 0; pointer-events: none; }
+.focus-target { position: absolute; width: 44px; height: 44px; border: 2px solid white; border-radius: 50%; transform: translate(-50%, -50%); background: rgba(15,23,42,.3); box-shadow: 0 0 0 5px rgba(255,255,255,.2), 0 8px 28px rgba(15,23,42,.35); padding: 0; pointer-events: none; transition: left .28s ease, top .28s ease; }
 .focus-target::before, .focus-target::after { content: ""; position: absolute; background: white; left: 50%; top: 50%; transform: translate(-50%, -50%); }
 .focus-target::before { width: 18px; height: 2px; }
 .focus-target::after { width: 2px; height: 18px; }
@@ -34,14 +34,35 @@ button:disabled { opacity: .5; cursor: wait; }
 .output-controls select { min-width: 104px; border: 1px solid #cbd5e1; border-radius: 12px; background: white; padding: 10px 12px; color: #0f172a; }
 .output-controls input[type="range"] { width: 140px; accent-color: #111827; }
 .output-controls strong { color: #0f172a; }
+.size-tabs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; padding: 6px; margin: 28px 0 22px; background: #e2e8f0; border-radius: 18px; }
+.size-tab { min-height: 48px; border: 0; border-radius: 13px; background: transparent; color: #64748b; font-weight: 800; padding: 10px 14px; transition: .18s ease; }
+.size-tab.active { background: white; color: #0f172a; box-shadow: 0 2px 10px rgba(15,23,42,.08); }
+.menu-panel { margin-bottom: 20px; }
+.panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.panel-heading h3 { margin: 0 0 5px; font-size: 1.22rem; }
+.panel-heading p { margin: 0; color: #64748b; line-height: 1.5; }
+.custom-form { margin-top: 18px; padding: 18px; background: white; border: 1px solid #e2e8f0; border-radius: 20px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.custom-form > label:not(.ratio-lock) { display: grid; gap: 7px; color: #475569; font-size: .8rem; font-weight: 800; }
+.custom-form input[type="number"] { width: 100%; border: 1px solid #cbd5e1; border-radius: 12px; padding: 12px 13px; color: #0f172a; background: #fff; }
+.custom-form input[type="number"]:focus, .output-controls select:focus { outline: 2px solid #94a3b8; outline-offset: 2px; }
+.ratio-lock { grid-column: 1 / -1; display: flex; align-items: center; gap: 9px; color: #334155; font-size: .9rem; font-weight: 700; }
+.ratio-lock input { width: 18px; height: 18px; accent-color: #111827; }
+.ratio-presets { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 8px; }
+.ratio-presets button { border: 1px solid #cbd5e1; border-radius: 999px; padding: 8px 12px; background: #f8fafc; color: #334155; font-weight: 700; }
+.ratio-presets button:active { transform: scale(.97); }
+.custom-generate { grid-column: 1 / -1; min-height: 48px; border: 0; border-radius: 999px; font-weight: 800; }
+.form-error { grid-column: 1 / -1; min-height: 1.2em; color: #b91c1c; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; align-items: start; }
 .card { background: white; border: 1px solid #e2e8f0; border-radius: 20px; overflow: hidden; box-shadow: 0 8px 28px rgba(15,23,42,.04); }
 .thumb { min-height: 180px; max-height: 420px; padding: 14px; background: #e2e8f0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
 .thumb img { display: block; width: auto; height: auto; max-width: 100%; max-height: 392px; object-fit: contain; background: #fff; box-shadow: 0 2px 14px rgba(15,23,42,.12); }
 .card-body { padding: 15px; display: grid; grid-template-columns: 1fr auto; gap: 10px 12px; align-items: center; }
-.card-body div { display: flex; flex-direction: column; }
+.card-meta { display: flex; flex-direction: column; }
 .card-body span, .card-body small { color: #64748b; font-size: .82rem; }
-.card button { grid-column: 1 / -1; }
+.card-actions { grid-column: 1 / -1; display: flex; flex-direction: row; gap: 8px; }
+.card-actions button { flex: 1; }
+.card-actions .remove-button { background: #fff; color: #64748b; border: 1px solid #cbd5e1; }
+.empty-state { color: #64748b; text-align: center; padding: 28px 12px; margin: 0; }
 @media (max-width: 860px) { .results-head { align-items: stretch; flex-direction: column; } .output-controls { justify-content: flex-start; } }
 @media (max-width: 720px) { .focus-editor { grid-template-columns: 1fr; } }
-@media (max-width: 620px) { .app { padding-top: 42px; } .secondary { width: 100%; } .focus-stage { min-height: 220px; border-radius: 18px; } .output-controls { display: grid; grid-template-columns: 1fr; width: 100%; } .output-controls select, .output-controls input[type="range"] { width: 100%; } .thumb { min-height: 160px; max-height: 360px; padding: 12px; } .thumb img { max-height: 336px; } }
+@media (max-width: 620px) { .app { padding-top: 42px; } .secondary { width: 100%; } .focus-stage { min-height: 220px; border-radius: 18px; } .output-controls { display: grid; grid-template-columns: 1fr; width: 100%; } .output-controls select, .output-controls input[type="range"] { width: 100%; } .size-tabs { margin-top: 24px; overflow-x: auto; grid-template-columns: repeat(3, minmax(112px, 1fr)); } .size-tab { font-size: .88rem; padding-inline: 10px; } .custom-form { grid-template-columns: 1fr; padding: 15px; } .custom-form > *, .ratio-lock, .ratio-presets, .custom-generate, .form-error { grid-column: 1; } .thumb { min-height: 160px; max-height: 360px; padding: 12px; } .thumb img { max-height: 336px; } }
