@@ -29,6 +29,9 @@ const customHeight = document.querySelector<HTMLInputElement>('#custom-height')!
 const lockRatio = document.querySelector<HTMLInputElement>('#lock-ratio')!
 const customError = document.querySelector<HTMLElement>('#custom-error')!
 const ratioButtons = [...document.querySelectorAll<HTMLButtonElement>('[data-ratio]')]
+const backgroundButtons = [...document.querySelectorAll<HTMLButtonElement>('[data-background]')]
+const passportBackgroundColor = document.querySelector<HTMLInputElement>('#passport-background-color')!
+const backgroundStatus = document.querySelector<HTMLElement>('#background-status')!
 
 const MAX_WORKING_PIXELS = 12_000_000
 const MAX_WORKING_EDGE = 4096
@@ -57,6 +60,7 @@ let activeMenu: PresetGroup = 'social'
 let passportRequested = false
 let customSequence = 0
 let lockedRatio = 1
+let activeBackground = 'original'
 
 function currentFormat() { return formatSelect.value as OutputFormat }
 function currentQuality() { return Number(qualityInput.value) / 100 }
@@ -272,6 +276,7 @@ async function downloadZip() {
       source: currentFileName,
       format: currentFormat(),
       quality: currentFormat() === 'png' ? null : Number(qualityInput.value),
+      passportBackground: activeBackground,
       files: generated.map((item) => ({
         id: item.preset.id,
         group: item.preset.group,
@@ -311,6 +316,37 @@ function setMenu(menu: PresetGroup) {
   }
 }
 
+function selectBackground(value: string) {
+  activeBackground = value
+  for (const button of backgroundButtons) {
+    const active = button.dataset.background === value
+    button.classList.toggle('active', active)
+    button.setAttribute('aria-pressed', String(active))
+  }
+  if (value !== 'original' && !backgroundButtons.some((button) => button.dataset.background === value)) {
+    for (const button of backgroundButtons) {
+      button.classList.remove('active')
+      button.setAttribute('aria-pressed', 'false')
+    }
+  }
+}
+
+function requestBackground(value: string) {
+  if (!activeWorker) {
+    backgroundStatus.textContent = 'Choose an image first.'
+    return
+  }
+  selectBackground(value)
+  backgroundStatus.textContent = value === 'original'
+    ? 'Restoring the original background…'
+    : 'Removing the original background locally…'
+  status.textContent = value === 'original'
+    ? 'Restoring passport photo background…'
+    : 'Replacing passport photo background…'
+  downloadAll.disabled = true
+  activeWorker.postMessage({ type: 'background', value })
+}
+
 function customDimensions() {
   const width = Math.round(Number(customWidth.value))
   const height = Math.round(Number(customHeight.value))
@@ -343,6 +379,9 @@ async function process(file: File) {
   revokeResults()
   passportRequested = false
   customSequence = 0
+  activeBackground = 'original'
+  selectBackground('original')
+  backgroundStatus.textContent = ''
   activeMenu = 'social'
   setMenu('social')
   currentFileName = file.name
@@ -374,6 +413,11 @@ async function process(file: File) {
       const message = event.data
       if (message.type === 'status') status.textContent = message.message
       if (message.type === 'auto-focus-point') setTarget(message.x, message.y)
+      if (message.type === 'background-ready') {
+        backgroundStatus.textContent = message.value === 'original'
+          ? 'Original background restored.'
+          : 'Background replaced. The person mask is cached for faster color changes.'
+      }
       if (message.type === 'result') {
         const blob = new Blob([message.bytes], { type: message.mime })
         upsertResult({
@@ -394,6 +438,7 @@ async function process(file: File) {
       }
       if (message.type === 'error') {
         status.textContent = `Error: ${message.message}`
+        backgroundStatus.textContent = `Background error: ${message.message}`
         pick.disabled = false
         downloadAll.disabled = generated.length === 0
       }
@@ -434,6 +479,11 @@ formatSelect.addEventListener('change', regenerateWithSettings)
 qualityInput.addEventListener('input', updateQualityUi)
 qualityInput.addEventListener('change', regenerateWithSettings)
 menuButtons.forEach((button) => button.addEventListener('click', () => setMenu(button.dataset.menu as PresetGroup)))
+backgroundButtons.forEach((button) => button.addEventListener('click', () => requestBackground(button.dataset.background ?? 'original')))
+passportBackgroundColor.addEventListener('input', () => {
+  selectBackground(passportBackgroundColor.value)
+})
+passportBackgroundColor.addEventListener('change', () => requestBackground(passportBackgroundColor.value))
 
 customForm.addEventListener('submit', (event) => {
   event.preventDefault()
@@ -497,4 +547,5 @@ window.addEventListener('resize', repositionTarget)
 
 updateQualityUi()
 setMenu('social')
+selectBackground('original')
 downloadAll.disabled = true
