@@ -1,4 +1,5 @@
 import './style.css'
+import { zipSync, strToU8 } from 'fflate'
 import type { SocialPreset } from './presets'
 
 const fileInput = document.querySelector<HTMLInputElement>('#file')!
@@ -13,11 +14,16 @@ const focusStage = document.querySelector<HTMLElement>('#focus-stage')!
 const focusImage = document.querySelector<HTMLImageElement>('#focus-image')!
 const focusTarget = document.querySelector<HTMLButtonElement>('#focus-target')!
 const resetFocus = document.querySelector<HTMLButtonElement>('#reset-focus')!
+const formatSelect = document.querySelector<HTMLSelectElement>('#format')!
+const qualityInput = document.querySelector<HTMLInputElement>('#quality')!
+const qualityValue = document.querySelector<HTMLElement>('#quality-value')!
+const qualityWrap = document.querySelector<HTMLElement>('#quality-wrap')!
 
 const MAX_WORKING_PIXELS = 12_000_000
 const MAX_WORKING_EDGE = 4096
 
-type Generated = { preset: SocialPreset; blob: Blob; url: string }
+type OutputFormat = 'png' | 'jpeg' | 'webp'
+type Generated = { preset: SocialPreset; blob: Blob; url: string; extension: string; mime: string }
 type DecodedImage = {
   rgba: Uint8ClampedArray
   width: number
@@ -32,6 +38,10 @@ let activeWorker: Worker | undefined
 let originalUrl: string | undefined
 let dragging = false
 let regenTimer: number | undefined
+let currentFileName = 'crop-image'
+
+function currentFormat() { return formatSelect.value as OutputFormat }
+function currentQuality() { return Number(qualityInput.value) / 100 }
 
 function revokeResults() {
   for (const item of generated) URL.revokeObjectURL(item.url)
@@ -92,11 +102,17 @@ function download(blob: Blob, filename: string) {
   setTimeout(() => URL.revokeObjectURL(a.href), 1000)
 }
 
+function humanBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+
 function createCard(item: Generated) {
   const card = document.createElement('article')
   card.className = 'card'
-  card.innerHTML = `<div class="thumb"><img src="${item.url}" alt="${item.preset.platform} ${item.preset.label}" /></div><div class="card-body"><div><strong>${item.preset.platform}</strong><span>${item.preset.label}</span></div><small>${item.preset.width} × ${item.preset.height}</small><button>Download</button></div>`
-  card.querySelector('button')!.addEventListener('click', () => download(item.blob, `${item.preset.id}.png`))
+  card.innerHTML = `<div class="thumb"><img src="${item.url}" alt="${item.preset.platform} ${item.preset.label}" /></div><div class="card-body"><div><strong>${item.preset.platform}</strong><span>${item.preset.label}</span></div><small>${item.preset.width} × ${item.preset.height} · ${item.extension.toUpperCase()} · ${humanBytes(item.blob.size)}</small><button>Download</button></div>`
+  card.querySelector('button')!.addEventListener('click', () => download(item.blob, `${item.preset.id}.${item.extension}`))
   return card
 }
 
@@ -124,9 +140,60 @@ function focusFromPointer(event: PointerEvent) {
   scheduleFocus((event.clientX - rect.left) / rect.width, (event.clientY - rect.top) / rect.height)
 }
 
+function updateQualityUi() {
+  qualityValue.textContent = qualityInput.value
+  qualityWrap.hidden = currentFormat() === 'png'
+}
+
+function regenerateWithSettings() {
+  updateQualityUi()
+  if (!activeWorker) return
+  status.textContent = 'Updating output settings…'
+  activeWorker.postMessage({ type: 'settings', format: currentFormat(), quality: currentQuality() })
+}
+
+async function downloadZip() {
+  if (!generated.length) return
+  downloadAll.disabled = true
+  status.textContent = 'Creating ZIP locally…'
+  try {
+    const files: Record<string, Uint8Array> = {}
+    for (const item of generated) {
+      files[`${item.preset.platform.toLowerCase()}/${item.preset.id}.${item.extension}`] = new Uint8Array(await item.blob.arrayBuffer())
+    }
+    files['manifest.json'] = strToU8(JSON.stringify({
+      generatedAt: new Date().toISOString(),
+      source: currentFileName,
+      format: currentFormat(),
+      quality: currentFormat() === 'png' ? null : Number(qualityInput.value),
+      files: generated.map((item) => ({
+        id: item.preset.id,
+        platform: item.preset.platform,
+        label: item.preset.label,
+        width: item.preset.width,
+        height: item.preset.height,
+        filename: `${item.preset.platform.toLowerCase()}/${item.preset.id}.${item.extension}`,
+      })),
+    }, null, 2))
+    const zipped = zipSync(files, { level: 6 })
+    download(new Blob([zipped], { type: 'application/zip' }), 'social-media-crops.zip')
+    status.textContent = `Done — ZIP contains ${generated.length} images.`
+  } catch (error) {
+    status.textContent = `Error creating ZIP: ${error instanceof Error ? error.message : String(error)}`
+  } finally {
+    downloadAll.disabled = false
+  }
+}
+
 async function process(file: File) {
+  if (!file.type.startsWith('image/')) {
+    status.textContent = 'Please choose an image file.'
+    return
+  }
+
   activeWorker?.terminate()
   revokeResults()
+  currentFileName = file.name
   results.hidden = false
   focusEditor.hidden = false
   status.textContent = 'Reading image…'
@@ -154,14 +221,22 @@ async function process(file: File) {
       const message = event.data
       if (message.type === 'status') status.textContent = message.message
       if (message.type === 'result') {
-        const blob = new Blob([message.bytes], { type: 'image/png' })
-        const item = { preset: message.preset as SocialPreset, blob, url: URL.createObjectURL(blob) }
+        const blob = new Blob([message.bytes], { type: message.mime })
+        const item: Generated = {
+          preset: message.preset as SocialPreset,
+          blob,
+          url: URL.createObjectURL(blob),
+          extension: message.extension,
+          mime: message.mime,
+        }
         if (message.replace) replaceResults(item)
         else { generated.push(item); renderGrid() }
         status.textContent = `Generated ${message.index + 1} / ${message.total}`
       }
       if (message.type === 'done') {
-        status.textContent = message.manual ? 'Done — manual focus applied to every format.' : `Done — ${generated.length} images generated locally.`
+        status.textContent = message.manual
+          ? 'Done — manual focus applied to every format.'
+          : `Done — ${generated.length} images generated locally.`
         pick.disabled = false
       }
       if (message.type === 'error') {
@@ -173,7 +248,14 @@ async function process(file: File) {
       status.textContent = `Error: ${event.message}`
       pick.disabled = false
     }
-    worker.postMessage({ type: 'load', rgba: image.rgba.buffer, width: image.width, height: image.height }, [image.rgba.buffer])
+    worker.postMessage({
+      type: 'load',
+      rgba: image.rgba.buffer,
+      width: image.width,
+      height: image.height,
+      format: currentFormat(),
+      quality: currentQuality(),
+    }, [image.rgba.buffer])
   } catch (error) {
     status.textContent = `Error: ${error instanceof Error ? error.message : String(error)}`
     pick.disabled = false
@@ -184,9 +266,17 @@ pick.addEventListener('click', () => fileInput.click())
 fileInput.addEventListener('change', () => fileInput.files?.[0] && process(fileInput.files[0]))
 dropzone.addEventListener('dragover', (event) => { event.preventDefault(); dropzone.classList.add('drag') })
 dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'))
-dropzone.addEventListener('drop', (event) => { event.preventDefault(); dropzone.classList.remove('drag'); const file = event.dataTransfer?.files[0]; if (file?.type.startsWith('image/')) process(file) })
+dropzone.addEventListener('drop', (event) => {
+  event.preventDefault()
+  dropzone.classList.remove('drag')
+  const file = event.dataTransfer?.files[0]
+  if (file) process(file)
+})
 
-downloadAll.addEventListener('click', () => { generated.forEach((item, index) => setTimeout(() => download(item.blob, `${item.preset.id}.png`), index * 120)) })
+downloadAll.addEventListener('click', downloadZip)
+formatSelect.addEventListener('change', regenerateWithSettings)
+qualityInput.addEventListener('input', updateQualityUi)
+qualityInput.addEventListener('change', regenerateWithSettings)
 
 focusStage.addEventListener('pointerdown', (event) => {
   dragging = true
@@ -201,3 +291,5 @@ resetFocus.addEventListener('click', () => {
   setTarget(0.5, 0.5)
   activeWorker?.postMessage({ type: 'auto' })
 })
+
+updateQualityUi()
