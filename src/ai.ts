@@ -52,7 +52,10 @@ export async function detectFaces(rgba: Uint8ClampedArray, width: number, height
   const source = new OffscreenCanvas(width, height)
   const sourceCtx = source.getContext('2d')
   if (!sourceCtx) return []
-  sourceCtx.putImageData(new ImageData(rgba, width, height), 0, 0)
+
+  const sourcePixels = new Uint8ClampedArray(rgba.length)
+  sourcePixels.set(rgba)
+  sourceCtx.putImageData(new ImageData(sourcePixels, width, height), 0, 0)
   ctx.drawImage(source, 0, 0, MODEL_WIDTH, MODEL_HEIGHT)
 
   const pixels = ctx.getImageData(0, 0, MODEL_WIDTH, MODEL_HEIGHT).data
