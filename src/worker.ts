@@ -57,6 +57,8 @@ async function generate(manualFocus?: { x: number; y: number }, replace = false)
   if (!cachedRgba) throw new Error('No image loaded')
   const manualX = manualFocus ? manualFocus.x : -1
   const manualY = manualFocus ? manualFocus.y : -1
+  const wasmPixels = new Uint8Array(cachedRgba.buffer as ArrayBuffer, cachedRgba.byteOffset, cachedRgba.byteLength)
+
   self.postMessage({
     type: 'status',
     message: manualFocus
@@ -69,7 +71,7 @@ async function generate(manualFocus?: { x: number; y: number }, replace = false)
   for (let i = 0; i < SOCIAL_PRESETS.length; i++) {
     const preset = SOCIAL_PRESETS[i]
     const png = smart_crop_png(
-      cachedRgba,
+      wasmPixels,
       cachedWidth,
       cachedHeight,
       preset.width,
