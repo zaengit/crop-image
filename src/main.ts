@@ -111,8 +111,27 @@ function humanBytes(bytes: number) {
 function createCard(item: Generated) {
   const card = document.createElement('article')
   card.className = 'card'
-  card.innerHTML = `<div class="thumb"><img src="${item.url}" alt="${item.preset.platform} ${item.preset.label}" /></div><div class="card-body"><div><strong>${item.preset.platform}</strong><span>${item.preset.label}</span></div><small>${item.preset.width} × ${item.preset.height} · ${item.extension.toUpperCase()} · ${humanBytes(item.blob.size)}</small><button>Download</button></div>`
-  card.querySelector('button')!.addEventListener('click', () => download(item.blob, `${item.preset.id}.${item.extension}`))
+
+  const thumb = document.createElement('div')
+  thumb.className = 'thumb'
+  const image = document.createElement('img')
+  image.src = item.url
+  image.alt = `${item.preset.platform} ${item.preset.label}`
+  image.width = item.preset.width
+  image.height = item.preset.height
+  image.style.aspectRatio = `${item.preset.width} / ${item.preset.height}`
+  thumb.append(image)
+
+  const body = document.createElement('div')
+  body.className = 'card-body'
+  body.innerHTML = `<div><strong>${item.preset.platform}</strong><span>${item.preset.label}</span></div><small>${item.preset.width} × ${item.preset.height} · ${item.extension.toUpperCase()} · ${humanBytes(item.blob.size)}</small>`
+
+  const button = document.createElement('button')
+  button.textContent = 'Download'
+  button.addEventListener('click', () => download(item.blob, `${item.preset.id}.${item.extension}`))
+  body.append(button)
+
+  card.append(thumb, body)
   return card
 }
 
