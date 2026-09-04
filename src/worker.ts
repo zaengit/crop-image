@@ -2,7 +2,7 @@
 
 import initWasm, { smart_crop_png } from './wasm/pkg/crop_image_wasm.js'
 import { detectFaces, type FocusRegion } from './ai'
-import { SOCIAL_PRESETS } from './presets'
+import { PASSPORT_PRESETS, SOCIAL_PRESETS, type ImagePreset } from './presets'
 
 type OutputFormat = 'png' | 'jpeg' | 'webp'
 type Mode = { kind: 'focus'; x: number; y: number } | { kind: 'auto' }
@@ -17,6 +17,7 @@ let pendingMode: Mode | undefined
 let currentMode: Mode = { kind: 'auto' }
 let outputFormat: OutputFormat = 'jpeg'
 let outputQuality = 0.9
+const activePresets = new Map<string, ImagePreset>()
 
 function ensureWasm() { wasmReady ??= initWasm(); return wasmReady }
 
@@ -75,8 +76,14 @@ async function encodeOutput(pngBytes: Uint8Array, width: number, height: number)
   }
 }
 
-async function generate(manualFocus?: { x: number; y: number }, replace = false) {
+function currentManualFocus() {
+  return currentMode.kind === 'focus' ? { x: currentMode.x, y: currentMode.y } : undefined
+}
+
+async function generatePresets(presets: ImagePreset[], manualFocus = currentManualFocus(), replace = false) {
   if (!cachedRgba) throw new Error('No image loaded')
+  if (!presets.length) return
+
   const manualX = manualFocus ? manualFocus.x : -1
   const manualY = manualFocus ? manualFocus.y : -1
   const wasmPixels = new Uint8Array(cachedRgba.buffer as ArrayBuffer, cachedRgba.byteOffset, cachedRgba.byteLength)
@@ -87,11 +94,11 @@ async function generate(manualFocus?: { x: number; y: number }, replace = false)
       ? 'Applying manual focus…'
       : cachedFocus.length
         ? `Found ${cachedFocus.length} face${cachedFocus.length > 1 ? 's' : ''}. Cropping…`
-        : 'Using saliency smart crop…',
+        : 'Using smart crop…',
   })
 
-  for (let i = 0; i < SOCIAL_PRESETS.length; i++) {
-    const preset = SOCIAL_PRESETS[i]
+  for (let i = 0; i < presets.length; i++) {
+    const preset = presets[i]
     const png = smart_crop_png(
       wasmPixels,
       cachedWidth,
@@ -113,14 +120,13 @@ async function generate(manualFocus?: { x: number; y: number }, replace = false)
       mime: encoded.mime,
       extension: encoded.extension,
       index: i,
-      total: SOCIAL_PRESETS.length,
+      total: presets.length,
       replace,
     }, [encoded.bytes])
   }
-  self.postMessage({ type: 'done', manual: Boolean(manualFocus), format: outputFormat, quality: outputQuality })
 }
 
-async function runQueuedGeneration(mode: Mode) {
+async function regenerateActive(mode: Mode) {
   pendingMode = mode
   currentMode = mode
   if (generating) return
@@ -130,11 +136,10 @@ async function runQueuedGeneration(mode: Mode) {
     while (pendingMode) {
       const next = pendingMode
       pendingMode = undefined
-      if (next.kind === 'focus') await generate({ x: next.x, y: next.y }, true)
-      else {
-        postAutoFocusPoint()
-        await generate(undefined, true)
-      }
+      if (next.kind === 'auto') postAutoFocusPoint()
+      const manual = next.kind === 'focus' ? { x: next.x, y: next.y } : undefined
+      await generatePresets([...activePresets.values()], manual, true)
+      self.postMessage({ type: 'done', manual: next.kind === 'focus', format: outputFormat, quality: outputQuality })
     }
   } finally {
     generating = false
@@ -146,6 +151,9 @@ self.onmessage = async (event: MessageEvent<
   | { type: 'focus'; x: number; y: number }
   | { type: 'auto' }
   | { type: 'settings'; format: OutputFormat; quality: number }
+  | { type: 'passport' }
+  | { type: 'custom'; preset: ImagePreset }
+  | { type: 'remove-custom'; id: string }
 >) => {
   try {
     await ensureWasm()
@@ -153,17 +161,37 @@ self.onmessage = async (event: MessageEvent<
     if (event.data.type === 'settings') {
       outputFormat = event.data.format
       outputQuality = Math.min(1, Math.max(0.1, event.data.quality))
-      await runQueuedGeneration(currentMode)
+      await regenerateActive(currentMode)
       return
     }
 
     if (event.data.type === 'focus') {
-      await runQueuedGeneration({ kind: 'focus', x: event.data.x, y: event.data.y })
+      await regenerateActive({ kind: 'focus', x: event.data.x, y: event.data.y })
       return
     }
 
     if (event.data.type === 'auto') {
-      await runQueuedGeneration({ kind: 'auto' })
+      await regenerateActive({ kind: 'auto' })
+      return
+    }
+
+    if (event.data.type === 'passport') {
+      const fresh = PASSPORT_PRESETS.filter((preset) => !activePresets.has(preset.id))
+      for (const preset of PASSPORT_PRESETS) activePresets.set(preset.id, preset)
+      if (fresh.length) await generatePresets(fresh, currentManualFocus())
+      self.postMessage({ type: 'done', manual: currentMode.kind === 'focus', format: outputFormat, quality: outputQuality })
+      return
+    }
+
+    if (event.data.type === 'custom') {
+      activePresets.set(event.data.preset.id, event.data.preset)
+      await generatePresets([event.data.preset], currentManualFocus())
+      self.postMessage({ type: 'done', manual: currentMode.kind === 'focus', format: outputFormat, quality: outputQuality })
+      return
+    }
+
+    if (event.data.type === 'remove-custom') {
+      activePresets.delete(event.data.id)
       return
     }
 
@@ -175,11 +203,14 @@ self.onmessage = async (event: MessageEvent<
     cachedFocus = []
     pendingMode = undefined
     currentMode = { kind: 'auto' }
+    activePresets.clear()
+    for (const preset of SOCIAL_PRESETS) activePresets.set(preset.id, preset)
     self.postMessage({ type: 'status', message: 'Finding the subject…' })
     try { cachedFocus = await detectFaces(cachedRgba, cachedWidth, cachedHeight) }
-    catch (error) { console.warn('Face detector unavailable; using Rust saliency fallback.', error) }
+    catch (error) { console.warn('Face detector unavailable; using smart-crop fallback.', error) }
     postAutoFocusPoint()
-    await generate()
+    await generatePresets(SOCIAL_PRESETS)
+    self.postMessage({ type: 'done', manual: false, format: outputFormat, quality: outputQuality })
   } catch (error) {
     self.postMessage({ type: 'error', message: error instanceof Error ? error.message : String(error) })
   }
