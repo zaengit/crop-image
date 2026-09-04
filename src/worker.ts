@@ -30,11 +30,24 @@ function ensureWasm() { wasmReady ??= initWasm(); return wasmReady }
 function ensureSegmenter() {
   segmenterReady ??= (async () => {
     self.postMessage({ type: 'status', message: 'Loading local background remover…' })
-    const fileset = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm')
+
+    const wasmPath = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm'
+    const resolveVision = FilesetResolver.forVisionTasks as unknown as (
+      path: string,
+      useModuleLoader?: boolean,
+    ) => Promise<{ wasmLoaderPath: string; [key: string]: unknown }>
+    const fileset = await resolveVision(wasmPath, true)
+    fileset.wasmLoaderPath = `${fileset.wasmLoaderPath}${fileset.wasmLoaderPath.includes('?') ? '&' : '?'}cb=${Date.now()}`
+
+    const modelUrl = new URL(`${import.meta.env.BASE_URL}models/selfie_segmenter.tflite`, self.location.origin).href
+    const modelResponse = await fetch(modelUrl)
+    if (!modelResponse.ok) throw new Error(`Unable to load background model (${modelResponse.status})`)
+    const modelAssetBuffer = new Uint8Array(await modelResponse.arrayBuffer())
+
     segmenterCanvas = new OffscreenCanvas(1, 1)
-    return ImageSegmenter.createFromOptions(fileset, {
+    return ImageSegmenter.createFromOptions(fileset as never, {
       baseOptions: {
-        modelAssetPath: new URL(`${import.meta.env.BASE_URL}models/selfie_segmenter.tflite`, self.location.origin).href,
+        modelAssetBuffer,
         delegate: 'CPU',
       },
       canvas: segmenterCanvas,
@@ -42,7 +55,10 @@ function ensureSegmenter() {
       outputCategoryMask: false,
       outputConfidenceMasks: true,
     })
-  })()
+  })().catch((error) => {
+    segmenterReady = undefined
+    throw error
+  })
   return segmenterReady
 }
 
