@@ -12,6 +12,7 @@
     "setup": "npm run model:fetch && npm run wasm:build"
   },
   "dependencies": {
+    "fflate": "^0.8.2",
     "onnxruntime-web": "^1.22.0"
   },
   "devDependencies": {
