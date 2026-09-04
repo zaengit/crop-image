@@ -32,6 +32,28 @@ function extensionFromMime(mime: string) {
   return 'png'
 }
 
+function autoFocusPoint() {
+  if (!cachedFocus.length) return { x: 0.5, y: 0.5 }
+  let totalWeight = 0
+  let x = 0
+  let y = 0
+  for (const region of cachedFocus) {
+    const weight = Math.max(0.01, region.confidence)
+    x += (region.x + region.width / 2) * weight
+    y += (region.y + region.height / 2) * weight
+    totalWeight += weight
+  }
+  return {
+    x: Math.min(1, Math.max(0, x / totalWeight)),
+    y: Math.min(1, Math.max(0, y / totalWeight)),
+  }
+}
+
+function postAutoFocusPoint() {
+  const point = autoFocusPoint()
+  self.postMessage({ type: 'auto-focus-point', x: point.x, y: point.y })
+}
+
 async function encodeOutput(pngBytes: Uint8Array, width: number, height: number) {
   if (outputFormat === 'png') {
     return { bytes: pngBytes.slice().buffer, mime: 'image/png', extension: 'png' }
@@ -109,7 +131,10 @@ async function runQueuedGeneration(mode: Mode) {
       const next = pendingMode
       pendingMode = undefined
       if (next.kind === 'focus') await generate({ x: next.x, y: next.y }, true)
-      else await generate(undefined, true)
+      else {
+        postAutoFocusPoint()
+        await generate(undefined, true)
+      }
     }
   } finally {
     generating = false
@@ -153,6 +178,7 @@ self.onmessage = async (event: MessageEvent<
     self.postMessage({ type: 'status', message: 'Finding the subject…' })
     try { cachedFocus = await detectFaces(cachedRgba, cachedWidth, cachedHeight) }
     catch (error) { console.warn('Face detector unavailable; using Rust saliency fallback.', error) }
+    postAutoFocusPoint()
     await generate()
   } catch (error) {
     self.postMessage({ type: 'error', message: error instanceof Error ? error.message : String(error) })
