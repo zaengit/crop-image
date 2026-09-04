@@ -14,7 +14,7 @@
     "setup": "npm run model:fetch && npm run wasm:build"
   },
   "dependencies": {
-    "@mediapipe/tasks-vision": "^1.0.1",
+    "@mediapipe/tasks-vision": "1.0.1",
     "fflate": "^0.8.2",
     "onnxruntime-web": "^1.22.0"
   },
