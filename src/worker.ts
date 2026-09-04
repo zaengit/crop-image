@@ -19,7 +19,17 @@ self.onmessage = async (event: MessageEvent<{ rgba: ArrayBuffer; width: number; 
     self.postMessage({ type: 'status', message: focus.length ? `Found ${focus.length} face${focus.length > 1 ? 's' : ''}. Cropping…` : 'Using saliency smart crop…' })
     for (let i = 0; i < SOCIAL_PRESETS.length; i++) {
       const preset = SOCIAL_PRESETS[i]
-      const png = smart_crop_png(rgba, width, height, preset.width, preset.height, JSON.stringify(focus))
+      const png = smart_crop_png(
+        rgba,
+        width,
+        height,
+        preset.width,
+        preset.height,
+        JSON.stringify(focus),
+        preset.safeTop ?? 0,
+        preset.safeBottom ?? 0,
+        preset.facePadding ?? 0.1,
+      )
       const bytes = png.slice().buffer
       self.postMessage({ type: 'result', preset, bytes, index: i, total: SOCIAL_PRESETS.length }, [bytes])
     }
