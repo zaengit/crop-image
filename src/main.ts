@@ -1,5 +1,6 @@
 import './style.css'
 import { zipSync, strToU8 } from 'fflate'
+import { initStoreAssets } from './store-assets'
 import type { ImagePreset, PresetGroup } from './presets'
 
 const fileInput = document.querySelector<HTMLInputElement>('#file')!
@@ -23,6 +24,7 @@ const menuButtons = [...document.querySelectorAll<HTMLButtonElement>('[data-menu
 const socialPanel = document.querySelector<HTMLElement>('#social-panel')!
 const passportPanel = document.querySelector<HTMLElement>('#passport-panel')!
 const customPanel = document.querySelector<HTMLElement>('#custom-panel')!
+const storePanel = document.querySelector<HTMLElement>('#store-panel')!
 const customForm = document.querySelector<HTMLFormElement>('#custom-form')!
 const customWidth = document.querySelector<HTMLInputElement>('#custom-width')!
 const customHeight = document.querySelector<HTMLInputElement>('#custom-height')!
@@ -121,11 +123,11 @@ async function decode(file: File): Promise<DecodedImage> {
 }
 
 function download(blob: Blob, filename: string) {
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(blob)
-  a.download = filename
-  a.click()
-  setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(blob)
+  link.download = filename
+  link.click()
+  setTimeout(() => URL.revokeObjectURL(link.href), 1000)
 }
 
 function humanBytes(bytes: number) {
@@ -162,7 +164,11 @@ function createCard(item: Generated) {
   body.className = 'card-body'
   const meta = document.createElement('div')
   meta.className = 'card-meta'
-  meta.innerHTML = `<strong>${item.preset.platform}</strong><span>${item.preset.label}</span>`
+  const strong = document.createElement('strong')
+  strong.textContent = item.preset.platform
+  const span = document.createElement('span')
+  span.textContent = item.preset.label
+  meta.append(strong, span)
   const details = document.createElement('small')
   details.textContent = `${item.preset.width} × ${item.preset.height} · ${item.extension.toUpperCase()} · ${humanBytes(item.blob.size)}`
   body.append(meta, details)
@@ -189,6 +195,12 @@ function createCard(item: Generated) {
 }
 
 function renderGrid() {
+  if (activeMenu === 'store') {
+    grid.hidden = true
+    emptyState.hidden = true
+    return
+  }
+  grid.hidden = false
   const visible = generated.filter((item) => item.preset.group === activeMenu)
   grid.replaceChildren(...visible.map(createCard))
   emptyState.hidden = visible.length > 0 || activeMenu === 'passport' || activeMenu === 'social'
@@ -259,6 +271,7 @@ function regenerateWithSettings() {
 function folderFor(group: PresetGroup) {
   if (group === 'passport') return 'passport-photo'
   if (group === 'custom') return 'custom'
+  if (group === 'store') return 'app-store-assets'
   return 'social-media'
 }
 
@@ -306,6 +319,8 @@ function setMenu(menu: PresetGroup) {
   socialPanel.hidden = menu !== 'social'
   passportPanel.hidden = menu !== 'passport'
   customPanel.hidden = menu !== 'custom'
+  storePanel.hidden = menu !== 'store'
+  results.classList.toggle('store-mode', menu === 'store')
   renderGrid()
 
   if (menu === 'passport' && activeWorker && !passportRequested) {
@@ -382,10 +397,8 @@ async function process(file: File) {
   activeBackground = 'original'
   selectBackground('original')
   backgroundStatus.textContent = ''
-  activeMenu = 'social'
   setMenu('social')
   currentFileName = file.name
-  results.hidden = false
   focusEditor.hidden = false
   status.textContent = 'Reading image…'
   pick.disabled = true
@@ -480,9 +493,7 @@ qualityInput.addEventListener('input', updateQualityUi)
 qualityInput.addEventListener('change', regenerateWithSettings)
 menuButtons.forEach((button) => button.addEventListener('click', () => setMenu(button.dataset.menu as PresetGroup)))
 backgroundButtons.forEach((button) => button.addEventListener('click', () => requestBackground(button.dataset.background ?? 'original')))
-passportBackgroundColor.addEventListener('input', () => {
-  selectBackground(passportBackgroundColor.value)
-})
+passportBackgroundColor.addEventListener('input', () => selectBackground(passportBackgroundColor.value))
 passportBackgroundColor.addEventListener('change', () => requestBackground(passportBackgroundColor.value))
 
 customForm.addEventListener('submit', (event) => {
@@ -534,7 +545,11 @@ focusStage.addEventListener('pointerdown', (event) => {
   focusFromPointer(event)
 })
 focusStage.addEventListener('pointermove', (event) => { if (dragging) focusFromPointer(event) })
-focusStage.addEventListener('pointerup', (event) => { dragging = false; focusStage.releasePointerCapture(event.pointerId); focusFromPointer(event) })
+focusStage.addEventListener('pointerup', (event) => {
+  dragging = false
+  focusStage.releasePointerCapture(event.pointerId)
+  focusFromPointer(event)
+})
 focusStage.addEventListener('pointercancel', () => { dragging = false })
 resetFocus.addEventListener('click', () => {
   if (regenTimer) window.clearTimeout(regenTimer)
@@ -549,3 +564,4 @@ updateQualityUi()
 setMenu('social')
 selectBackground('original')
 downloadAll.disabled = true
+initStoreAssets()
