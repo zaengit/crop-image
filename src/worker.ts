@@ -12,7 +12,7 @@ let cachedFocus: FocusRegion[] = []
 
 function ensureWasm() { wasmReady ??= initWasm(); return wasmReady }
 
-async function generate(manualFocus?: { x: number; y: number }) {
+async function generate(manualFocus?: { x: number; y: number }, replace = false) {
   if (!cachedRgba) throw new Error('No image loaded')
   const manualX = manualFocus ? manualFocus.x : -1
   const manualY = manualFocus ? manualFocus.y : -1
@@ -33,7 +33,7 @@ async function generate(manualFocus?: { x: number; y: number }) {
       manualY,
     )
     const bytes = png.slice().buffer
-    self.postMessage({ type: 'result', preset, bytes, index: i, total: SOCIAL_PRESETS.length, replace: Boolean(manualFocus) }, [bytes])
+    self.postMessage({ type: 'result', preset, bytes, index: i, total: SOCIAL_PRESETS.length, replace }, [bytes])
   }
   self.postMessage({ type: 'done', manual: Boolean(manualFocus) })
 }
@@ -41,11 +41,16 @@ async function generate(manualFocus?: { x: number; y: number }) {
 self.onmessage = async (event: MessageEvent<
   | { type: 'load'; rgba: ArrayBuffer; width: number; height: number }
   | { type: 'focus'; x: number; y: number }
+  | { type: 'auto' }
 >) => {
   try {
     await ensureWasm()
     if (event.data.type === 'focus') {
-      await generate({ x: event.data.x, y: event.data.y })
+      await generate({ x: event.data.x, y: event.data.y }, true)
+      return
+    }
+    if (event.data.type === 'auto') {
+      await generate(undefined, true)
       return
     }
 
