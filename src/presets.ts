@@ -1,4 +1,4 @@
-export type PresetGroup = 'social' | 'passport' | 'custom'
+export type PresetGroup = 'social' | 'passport' | 'custom' | 'store'
 
 export type ImagePreset = {
   id: string
