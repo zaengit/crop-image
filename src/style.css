@@ -32,14 +32,14 @@ button:disabled { opacity: .5; cursor: wait; }
 .output-controls select { min-width: 104px; border: 1px solid #cbd5e1; border-radius: 12px; background: white; padding: 10px 12px; color: #0f172a; }
 .output-controls input[type="range"] { width: 140px; accent-color: #111827; }
 .output-controls strong { color: #0f172a; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; align-items: start; }
 .card { background: white; border: 1px solid #e2e8f0; border-radius: 20px; overflow: hidden; box-shadow: 0 8px 28px rgba(15,23,42,.04); }
-.thumb { aspect-ratio: 4/3; background: #e2e8f0; display: grid; place-items: center; overflow: hidden; }
-.thumb img { width: 100%; height: 100%; object-fit: contain; }
+.thumb { min-height: 180px; max-height: 420px; padding: 14px; background: #e2e8f0; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.thumb img { display: block; width: auto; height: auto; max-width: 100%; max-height: 392px; object-fit: contain; background: #fff; box-shadow: 0 2px 14px rgba(15,23,42,.12); }
 .card-body { padding: 15px; display: grid; grid-template-columns: 1fr auto; gap: 10px 12px; align-items: center; }
 .card-body div { display: flex; flex-direction: column; }
 .card-body span, .card-body small { color: #64748b; font-size: .82rem; }
 .card button { grid-column: 1 / -1; }
 @media (max-width: 860px) { .results-head { align-items: stretch; flex-direction: column; } .output-controls { justify-content: flex-start; } }
 @media (max-width: 720px) { .focus-editor { grid-template-columns: 1fr; } }
-@media (max-width: 620px) { .app { padding-top: 42px; } .secondary { width: 100%; } .focus-stage { min-height: 220px; border-radius: 18px; } .output-controls { display: grid; grid-template-columns: 1fr; width: 100%; } .output-controls select, .output-controls input[type="range"] { width: 100%; } }
+@media (max-width: 620px) { .app { padding-top: 42px; } .secondary { width: 100%; } .focus-stage { min-height: 220px; border-radius: 18px; } .output-controls { display: grid; grid-template-columns: 1fr; width: 100%; } .output-controls select, .output-controls input[type="range"] { width: 100%; } .thumb { min-height: 160px; max-height: 360px; padding: 12px; } .thumb img { max-height: 336px; } }
