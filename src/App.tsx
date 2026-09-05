@@ -1,113 +1,212 @@
-const ui = String.raw`
-<main class="app">
-  <header class="hero">
-    <p class="eyebrow">LOCAL • PRIVATE • WASM</p>
-    <h1>Upload once. Get every size you need.</h1>
-    <p>Smart crop runs on your device. Your image never leaves the browser.</p>
-  </header>
+import './style.css'
+import './enhancement.css'
+import { useCropEngine, downloadBlob, humanBytes, type Generated } from './use-crop-engine'
+import type { PresetGroup } from './presets'
+import { EnhancementPanel, enhancementPreviewFilter } from './EnhancementPanel'
+import { StoreAssetsPanel } from './StoreAssetsPanel'
 
-  <section class="upload-card" id="dropzone">
-    <input id="file" type="file" accept="image/*" hidden />
-    <button id="pick" class="primary">Choose image</button>
-    <p>or drop an image here</p>
-    <small id="status" aria-live="polite">Ready</small>
-  </section>
-
-  <section id="focus-editor" class="focus-editor" hidden>
-    <div class="focus-copy">
-      <p class="eyebrow">FOCAL POINT</p>
-      <h2>Fine-tune the smart crop</h2>
-      <p>Drag the target over the subject you want every generated size to prioritize.</p>
-      <button id="reset-focus" class="secondary" type="button">Use auto focus</button>
-    </div>
-    <div id="focus-stage" class="focus-stage">
-      <img id="focus-image" alt="Original upload for focal-point adjustment" />
-      <button id="focus-target" class="focus-target" type="button" aria-label="Focal point"></button>
-    </div>
-  </section>
-
-  <section id="results" class="results">
-    <div class="results-head">
-      <div><p class="eyebrow">GENERATE</p><h2>Image sizes</h2></div>
-      <div class="output-controls" aria-label="Output settings">
-        <label><span>Format</span><select id="format"><option value="jpeg" selected>JPEG</option><option value="webp">WebP</option><option value="png">PNG</option></select></label>
-        <label id="quality-wrap"><span>Quality <strong id="quality-value">90</strong></span><input id="quality" type="range" min="60" max="100" value="90" step="1" /></label>
-        <button id="download-all" class="secondary">Download ZIP</button>
+function ResultCard({ item, onDelete }: { item: Generated; onDelete: (id: string) => void }) {
+  return (
+    <article className="card overflow-hidden rounded-2xl border border-slate-800 bg-slate-900/70 shadow-xl shadow-black/10">
+      <div className="thumb flex items-center justify-center bg-slate-950/70 p-3">
+        <img
+          src={item.url}
+          alt={`${item.preset.platform} ${item.preset.label}`}
+          width={item.preset.width}
+          height={item.preset.height}
+          loading="lazy"
+          className="max-h-80 w-full object-contain"
+          style={{ aspectRatio: `${item.preset.width} / ${item.preset.height}` }}
+        />
       </div>
-    </div>
-
-    <nav class="size-tabs" aria-label="Image size categories">
-      <button class="size-tab active" type="button" data-menu="social" aria-pressed="true">Social media</button>
-      <button class="size-tab" type="button" data-menu="passport" aria-pressed="false">Passport photo</button>
-      <button class="size-tab" type="button" data-menu="custom" aria-pressed="false">Custom</button>
-      <button class="size-tab" type="button" data-menu="store" aria-pressed="false">App Store assets</button>
-    </nav>
-
-    <section id="social-panel" class="menu-panel">
-      <div class="panel-heading"><div><h3>Social media</h3><p>Adjust the focal point if needed, then generate ready-to-use social media sizes.</p></div><button id="generate-social" class="primary" type="button">Generate crop</button></div>
-    </section>
-
-    <section id="passport-panel" class="menu-panel" hidden>
-      <div class="panel-heading passport-heading"><div><h3>Passport photo</h3><p>Choose the background and generate portrait-focused 2 × 3, 3 × 4, and 4 × 6 outputs.</p></div><button id="generate-passport" class="primary" type="button">Generate crop</button></div>
-      <div class="background-control">
-        <div><strong>Background</strong><p>Keep the original scene or replace it with a solid color.</p></div>
-        <div class="background-options" role="group" aria-label="Passport photo background">
-          <button class="background-option active" type="button" data-background="original" aria-pressed="true">Original</button>
-          <button class="background-option" type="button" data-background="#ffffff" aria-pressed="false"><span class="color-dot white"></span>White</button>
-          <button class="background-option" type="button" data-background="#d71920" aria-pressed="false"><span class="color-dot red"></span>Red</button>
-          <button class="background-option" type="button" data-background="#1769d2" aria-pressed="false"><span class="color-dot blue"></span>Blue</button>
-          <label class="custom-color-option"><span>Custom</span><input id="passport-background-color" type="color" value="#e5e7eb" aria-label="Custom passport background color" /></label>
+      <div className="card-body space-y-3 p-4">
+        <div className="card-meta"><strong className="block text-sm text-white">{item.preset.platform}</strong><span className="text-sm text-slate-400">{item.preset.label}</span></div>
+        <small className="block text-slate-500">{item.preset.width} × {item.preset.height} · {item.extension.toUpperCase()} · {humanBytes(item.blob.size)}</small>
+        <div className="card-actions flex flex-wrap gap-2">
+          <button type="button" className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs font-medium hover:border-cyan-400" onClick={() => downloadBlob(item.blob, `${item.preset.id}.${item.extension}`)}>Download</button>
+          {item.preset.group === 'custom' ? <button type="button" className="remove-button rounded-lg border border-rose-900/70 px-3 py-1.5 text-xs text-rose-300" onClick={() => onDelete(item.preset.id)}>Delete</button> : null}
         </div>
-        <small id="background-status" class="background-status" aria-live="polite"></small>
       </div>
-    </section>
+    </article>
+  )
+}
 
-    <section id="custom-panel" class="menu-panel" hidden>
-      <div class="panel-heading"><div><h3>Custom size</h3><p>Create any pixel size while keeping smart crop and your current focal point.</p></div></div>
-      <form id="custom-form" class="custom-form">
-        <label><span>Width</span><input id="custom-width" type="number" min="64" max="8192" value="1080" inputmode="numeric" required /></label>
-        <label><span>Height</span><input id="custom-height" type="number" min="64" max="8192" value="1080" inputmode="numeric" required /></label>
-        <label class="ratio-lock"><input id="lock-ratio" type="checkbox" /><span>Lock aspect ratio</span></label>
-        <div class="ratio-presets" aria-label="Quick aspect ratios"><button type="button" data-ratio="1/1">1:1</button><button type="button" data-ratio="4/5">4:5</button><button type="button" data-ratio="9/16">9:16</button><button type="button" data-ratio="16/9">16:9</button><button type="button" data-ratio="2/3">2:3</button><button type="button" data-ratio="3/4">3:4</button></div>
-        <button class="primary custom-generate" type="submit">Generate custom size</button><small id="custom-error" class="form-error" aria-live="polite"></small>
-      </form>
-    </section>
-
-    <section id="store-panel" class="menu-panel store-panel" hidden>
-      <div class="panel-heading"><div><h3>App Store assets</h3><p>Create screenshots, feature graphics, and app icons for Google Play and Apple App Store.</p></div></div>
-      <nav class="store-tabs" aria-label="App Store asset type"><button type="button" class="store-tab active" data-store-view="screenshots" aria-pressed="true">Screenshots</button><button type="button" class="store-tab" data-store-view="icon" aria-pressed="false">App icon</button></nav>
-      <section id="store-screenshots" class="store-view">
-        <div class="store-grid-2">
-          <div class="store-card"><div class="store-card-head"><div><h4>Screenshots</h4><p>Upload up to 10 screenshots. Drag to reorder before generating.</p></div><button id="store-pick-screenshots" class="secondary compact" type="button">Add screenshots</button></div><input id="store-screenshot-input" type="file" accept="image/*" multiple hidden /><div id="store-screenshot-drop" class="mini-dropzone">Drop screenshots here</div><div id="store-screenshot-list" class="source-list"></div></div>
-          <div class="store-card store-settings">
-            <h4>Output settings</h4>
-            <div class="field-grid">
-              <label><span>Platform</span><select id="store-platform"><option value="both" selected>Google Play + Apple App Store</option><option value="google">Google Play</option><option value="apple">Apple App Store</option></select></label>
-              <label><span>Orientation</span><select id="store-orientation"><option value="portrait" selected>Portrait</option><option value="landscape">Landscape</option><option value="both">Both</option></select></label>
-              <label><span>Resize mode</span><select id="store-resize-mode"><option value="fit" selected>Fit</option><option value="smart">Smart crop</option><option value="fill">Fill</option></select></label>
-              <label><span>Format</span><select id="store-format"><option value="png" selected>PNG</option><option value="jpeg">JPEG</option></select></label>
-            </div>
-            <div class="setting-row"><span>Canvas background</span><div class="pill-group" role="group" aria-label="Screenshot canvas background"><button type="button" class="pill active" data-store-bg="auto" aria-pressed="true">Auto</button><button type="button" class="pill" data-store-bg="#ffffff" aria-pressed="false">White</button><button type="button" class="pill" data-store-bg="#000000" aria-pressed="false">Black</button><label class="color-pill">Custom <input id="store-bg-color" type="color" value="#f1f5f9" /></label></div></div>
-            <div class="asset-checks"><label><input type="checkbox" data-store-preset="phone" checked /> Google Play phone</label><label><input type="checkbox" data-store-preset="tablet7" checked /> Google Play 7-inch tablet</label><label><input type="checkbox" data-store-preset="tablet10" checked /> Google Play 10-inch tablet</label><label><input type="checkbox" data-store-preset="feature" checked /> Google Play feature graphic</label><label><input type="checkbox" data-store-preset="iphone" checked /> Apple iPhone 6.9-inch</label><label><input type="checkbox" data-store-preset="ipad" checked /> Apple iPad 13-inch</label></div>
-            <button id="store-generate-screenshots" class="primary store-action" type="button">Generate screenshot assets</button><small id="store-screenshot-status" class="store-status" aria-live="polite"></small>
-          </div>
-        </div>
-        <div class="store-output-head"><div><h4>Generated screenshots</h4><p>Quality warnings are based on how much the source must be upscaled.</p></div><button id="store-download-screenshots" class="secondary compact" type="button" disabled>Download screenshots ZIP</button></div><div id="store-screenshot-results" class="store-results"></div>
-      </section>
-      <section id="store-icon" class="store-view" hidden>
-        <div class="store-grid-2">
-          <div class="store-card"><div class="store-card-head"><div><h4>Source icon</h4><p>Use a square image at 1024 × 1024 or larger for the best result.</p></div><button id="store-pick-icon" class="secondary compact" type="button">Choose icon</button></div><input id="store-icon-input" type="file" accept="image/*" hidden /><div id="store-icon-drop" class="mini-dropzone">Drop an icon here</div><small id="store-icon-source-info" class="store-status"></small><div class="icon-preview-pair"><div><span>Square</span><div id="icon-preview-square" class="icon-preview"><img id="icon-preview-image" alt="App icon preview" /></div></div><div><span>Rounded preview</span><div id="icon-preview-rounded" class="icon-preview rounded"><img id="icon-preview-rounded-image" alt="Rounded app icon preview" /></div></div></div></div>
-          <div class="store-card store-settings"><h4>Icon settings</h4><div class="field-grid"><label><span>Layout</span><select id="icon-fit-mode"><option value="fit" selected>Fit</option><option value="fill">Fill</option></select></label></div><div class="setting-row"><span>Background</span><div class="pill-group" role="group" aria-label="App icon background"><button type="button" class="pill active" data-icon-bg="transparent" aria-pressed="true">Transparent</button><button type="button" class="pill" data-icon-bg="#ffffff" aria-pressed="false">White</button><button type="button" class="pill" data-icon-bg="#000000" aria-pressed="false">Black</button><label class="color-pill">Custom <input id="icon-bg-color" type="color" value="#ffffff" /></label></div></div><div class="store-note"><strong>Exports</strong><p>Master 1024 × 1024, Google Play 512 × 512, plus common Apple asset-catalog icon sizes. Rounded corners are preview-only.</p></div><button id="store-generate-icons" class="primary store-action" type="button">Generate app icons</button><small id="store-icon-status" class="store-status" aria-live="polite"></small></div>
-        </div>
-        <div class="store-output-head"><div><h4>Generated app icons</h4><p>No rounded corners are baked into exported files.</p></div><button id="store-download-icons" class="secondary compact" type="button" disabled>Download icons ZIP</button></div><div id="store-icon-results" class="store-results"></div>
-      </section>
-    </section>
-
-    <div id="grid" class="grid"></div>
-    <p id="empty-state" class="empty-state" hidden>No sizes generated in this category yet.</p>
-  </section>
-</main>`
+function OutputSettings({ engine }: { engine: any }) {
+  return (
+    <div className="output-controls flex flex-wrap items-end gap-3" aria-label="Output settings">
+      <label className="grid gap-1 text-xs text-slate-400"><span>Format</span><select id="format" value={engine.format} onChange={(event: any) => engine.setFormat(event.currentTarget.value)} className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"><option value="jpeg">JPEG</option><option value="webp">WebP</option><option value="png">PNG</option></select></label>
+      {engine.format !== 'png' ? <label id="quality-wrap" className="grid min-w-44 gap-1 text-xs text-slate-400"><span>Quality <strong id="quality-value" className="text-slate-200">{engine.quality}</strong></span><input id="quality" type="range" min="60" max="100" value={engine.quality} step="1" className="accent-cyan-400" onInput={(event: any) => engine.setQuality(Number(event.currentTarget.value))} onChange={engine.commitQuality} /></label> : null}
+      <button id="download-all" className="secondary rounded-xl border border-slate-700 px-4 py-2 text-sm font-medium disabled:opacity-40" type="button" disabled={!engine.generated.length || engine.busy} onClick={() => void engine.downloadZip()}>Download ZIP</button>
+    </div>
+  )
+}
 
 export function App() {
-  return <div className="min-h-screen bg-slate-950 text-slate-100" dangerouslySetInnerHTML={{ __html: ui }} />
+  const engine = useCropEngine()
+  const [menu, setMenu] = React.useState<PresetGroup>('social')
+  const [draggingFocus, setDraggingFocus] = React.useState(false)
+  const [comparing, setComparing] = React.useState(false)
+  const [customWidth, setCustomWidth] = React.useState(1080)
+  const [customHeight, setCustomHeight] = React.useState(1080)
+  const [lockRatio, setLockRatio] = React.useState(false)
+  const [lockedRatio, setLockedRatio] = React.useState(1)
+  const [customError, setCustomError] = React.useState('')
+  const fileRef = React.useRef<any>(null)
+  const stageRef = React.useRef<any>(null)
+  const imageRef = React.useRef<any>(null)
+
+  React.useEffect(() => {
+    document.documentElement.dataset.appReady = 'true'
+    return () => { delete document.documentElement.dataset.appReady }
+  }, [])
+
+  const visibleResults = engine.generated.filter((item: Generated) => item.preset.group === menu)
+
+  const processFile = (file: File | undefined) => {
+    if (!file) return
+    setMenu('social')
+    setCustomError('')
+    void engine.processFile(file)
+  }
+
+  const renderedImageBox = () => {
+    const stage = stageRef.current as HTMLElement | null
+    const image = imageRef.current as HTMLImageElement | null
+    const stageWidth = stage?.clientWidth ?? 0
+    const stageHeight = stage?.clientHeight ?? 0
+    if (!image?.naturalWidth || !image.naturalHeight || !stageWidth || !stageHeight) return { left: 0, top: 0, width: stageWidth, height: stageHeight }
+    const imageRatio = image.naturalWidth / image.naturalHeight
+    const stageRatio = stageWidth / stageHeight
+    if (imageRatio > stageRatio) {
+      const height = stageWidth / imageRatio
+      return { left: 0, top: (stageHeight - height) / 2, width: stageWidth, height }
+    }
+    const width = stageHeight * imageRatio
+    return { left: (stageWidth - width) / 2, top: 0, width, height: stageHeight }
+  }
+
+  const focusFromPointer = (event: any) => {
+    const stage = stageRef.current as HTMLElement | null
+    if (!stage) return
+    const rect = stage.getBoundingClientRect()
+    const box = renderedImageBox()
+    engine.updateFocus(
+      (event.clientX - rect.left - box.left) / Math.max(1, box.width),
+      (event.clientY - rect.top - box.top) / Math.max(1, box.height),
+    )
+  }
+
+  const focusBox = renderedImageBox()
+  const targetStyle = engine.hasImage ? {
+    left: `${focusBox.left + engine.focus.x * focusBox.width}px`,
+    top: `${focusBox.top + engine.focus.y * focusBox.height}px`,
+  } : undefined
+
+  const setRatio = (ratio: number) => {
+    setLockedRatio(ratio)
+    setLockRatio(true)
+    setCustomHeight(Math.max(64, Math.min(8192, Math.round(customWidth / ratio))))
+  }
+
+  const updateWidth = (value: number) => {
+    setCustomWidth(value)
+    if (lockRatio && lockedRatio) setCustomHeight(Math.max(64, Math.min(8192, Math.round(value / lockedRatio))))
+  }
+
+  const updateHeight = (value: number) => {
+    setCustomHeight(value)
+    if (lockRatio && lockedRatio) setCustomWidth(Math.max(64, Math.min(8192, Math.round(value * lockedRatio))))
+  }
+
+  const submitCustom = (event: any) => {
+    event.preventDefault()
+    const error = engine.generateCustom(customWidth, customHeight)
+    setCustomError(error)
+  }
+
+  const previewFilter = enhancementPreviewFilter(engine.enhancement, comparing)
+
+  return (
+    <main className="app min-h-screen bg-slate-950 px-4 py-10 text-slate-100 sm:px-6 lg:px-8">
+      <div className="mx-auto max-w-7xl space-y-6">
+        <header className="hero py-5 text-center">
+          <p className="eyebrow text-xs font-bold tracking-[0.22em] text-cyan-400">LOCAL • PRIVATE • WASM</p>
+          <h1 className="mx-auto mt-3 max-w-4xl text-4xl font-bold tracking-tight text-white sm:text-5xl">Upload once. Get every size you need.</h1>
+          <p className="mx-auto mt-3 max-w-2xl text-slate-400">Smart crop runs on your device. Your image never leaves the browser.</p>
+        </header>
+
+        <section
+          className="upload-card rounded-3xl border border-dashed border-slate-700 bg-slate-900/60 p-8 text-center transition hover:border-cyan-500/60"
+          id="dropzone"
+          onDragOver={(event: any) => event.preventDefault()}
+          onDrop={(event: any) => { event.preventDefault(); processFile(event.dataTransfer?.files?.[0]) }}
+        >
+          <input ref={fileRef} id="file" type="file" accept="image/*" hidden onChange={(event: any) => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; processFile(file) }} />
+          <button id="pick" className="primary rounded-xl bg-cyan-500 px-5 py-2.5 font-semibold text-slate-950 shadow-lg shadow-cyan-500/15 disabled:opacity-50" type="button" disabled={engine.busy} onClick={() => fileRef.current?.click()}>Choose image</button>
+          <p className="mt-3 text-sm text-slate-500">or drop an image here</p>
+          <small id="status" aria-live="polite" className="mt-3 block text-sm text-slate-400">{engine.status}</small>
+        </section>
+
+        <EnhancementPanel
+          visible={engine.hasImage}
+          settings={engine.enhancement}
+          status={engine.enhancementStatus}
+          onApply={engine.applyEnhancement}
+          onAuto={engine.autoEnhance}
+          onReset={engine.resetEnhancement}
+          onCompareChange={setComparing}
+        />
+
+        {engine.hasImage ? (
+          <section id="focus-editor" className="focus-editor grid gap-5 rounded-3xl border border-slate-800 bg-slate-900/70 p-5 lg:grid-cols-[minmax(220px,0.35fr)_1fr]">
+            <div className="focus-copy">
+              <p className="eyebrow text-xs font-bold tracking-[0.2em] text-cyan-400">FOCAL POINT</p>
+              <h2 className="mt-2 text-2xl font-semibold text-white">Fine-tune the smart crop</h2>
+              <p className="mt-2 text-sm text-slate-400">Drag the target over the subject you want every generated size to prioritize.</p>
+              <button id="reset-focus" className="secondary mt-4 rounded-xl border border-slate-700 px-4 py-2 text-sm" type="button" onClick={engine.resetFocus}>Use auto focus</button>
+            </div>
+            <div
+              ref={stageRef}
+              id="focus-stage"
+              className="focus-stage relative flex min-h-[320px] touch-none items-center justify-center overflow-hidden rounded-2xl bg-slate-950"
+              onPointerDown={(event: any) => { setDraggingFocus(true); event.currentTarget.setPointerCapture?.(event.pointerId); focusFromPointer(event) }}
+              onPointerMove={(event: any) => { if (draggingFocus) focusFromPointer(event) }}
+              onPointerUp={(event: any) => { setDraggingFocus(false); event.currentTarget.releasePointerCapture?.(event.pointerId); focusFromPointer(event) }}
+              onPointerCancel={() => setDraggingFocus(false)}
+            >
+              <img ref={imageRef} id="focus-image" src={engine.sourceUrl} alt="Original upload for focal-point adjustment" className="max-h-[560px] max-w-full select-none object-contain" draggable={false} style={{ filter: previewFilter }} />
+              <button id="focus-target" className="focus-target absolute h-8 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-cyan-500/40 shadow-[0_0_0_5px_rgba(6,182,212,.25)]" style={targetStyle} type="button" aria-label="Focal point" />
+            </div>
+          </section>
+        ) : null}
+
+        <section id="results" className={`results rounded-3xl border border-slate-800 bg-slate-900/40 p-5 ${menu === 'store' ? 'store-mode' : ''}`}>
+          <div className="results-head flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div><p className="eyebrow text-xs font-bold tracking-[0.2em] text-cyan-400">GENERATE</p><h2 className="mt-2 text-2xl font-semibold text-white">Image sizes</h2></div>
+            <OutputSettings engine={engine} />
+          </div>
+
+          <nav className="size-tabs mt-5 flex gap-2 overflow-x-auto pb-1" aria-label="Image size categories">
+            {([
+              ['social', 'Social media'], ['passport', 'Passport photo'], ['custom', 'Custom'], ['store', 'App Store assets'],
+            ] as Array<[PresetGroup, string]>).map(([value, label]) => (
+              <button key={value} className={`size-tab whitespace-nowrap rounded-xl px-4 py-2 text-sm ${menu === value ? 'active bg-cyan-500 font-semibold text-slate-950' : 'border border-slate-700 text-slate-300'}`} type="button" data-menu={value} aria-pressed={menu === value} onClick={() => setMenu(value)}>{label}</button>
+            ))}
+          </nav>
+
+          {menu === 'social' ? <section id="social-panel" className="menu-panel mt-5 rounded-2xl border border-slate-800 bg-slate-950/30 p-4"><div className="panel-heading flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><h3 className="text-lg font-semibold">Social media</h3><p className="text-sm text-slate-400">Adjust the focal point if needed, then generate ready-to-use social media sizes.</p></div><button id="generate-social" className="primary rounded-xl bg-cyan-500 px-4 py-2 font-semibold text-slate-950 disabled:opacity-40" type="button" disabled={engine.busy} onClick={() => engine.generateGroup('social')}>Generate crop</button></div></section> : null}
+
+          {menu === 'passport' ? <section id="passport-panel" className="menu-panel mt-5 rounded-2xl border border-slate-800 bg-slate-950/30 p-4"><div className="panel-heading passport-heading flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between"><div><h3 className="text-lg font-semibold">Passport photo</h3><p className="text-sm text-slate-400">Choose the background and generate portrait-focused 2 × 3, 3 × 4, and 4 × 6 outputs.</p></div><button id="generate-passport" className="primary rounded-xl bg-cyan-500 px-4 py-2 font-semibold text-slate-950 disabled:opacity-40" type="button" disabled={engine.busy} onClick={() => engine.generateGroup('passport')}>Generate crop</button></div><div className="background-control mt-4 grid gap-3 lg:grid-cols-[220px_1fr]"><div><strong>Background</strong><p className="text-sm text-slate-400">Keep the original scene or replace it with a solid color.</p></div><div><div className="background-options flex flex-wrap gap-2" role="group" aria-label="Passport photo background">{[
+            ['original', 'Original'], ['#ffffff', 'White'], ['#d71920', 'Red'], ['#1769d2', 'Blue'],
+          ].map(([value, label]) => <button key={value} className={`background-option rounded-full border px-3 py-2 text-sm ${engine.background === value ? 'active border-cyan-400 text-cyan-200' : 'border-slate-700'}`} type="button" data-background={value} aria-pressed={engine.background === value} onClick={() => engine.setBackground(value)}>{label}</button>)}<label className="custom-color-option rounded-full border border-slate-700 px-3 py-2 text-sm"><span>Custom </span><input id="passport-background-color" type="color" value={engine.background.startsWith('#') ? engine.background : '#e5e7eb'} aria-label="Custom passport background color" onChange={(event: any) => engine.setBackground(event.currentTarget.value)} /></label></div><small id="background-status" className="background-status mt-2 block text-sm text-slate-400" aria-live="polite">{engine.backgroundStatus}</small></div></div></section> : null}
+
+          {menu === 'custom' ? <section id="custom-panel" className="menu-panel mt-5 rounded-2xl border border-slate-800 bg-slate-950/30 p-4"><div className="panel-heading"><div><h3 className="text-lg font-semibold">Custom size</h3><p className="text-sm text-slate-400">Create any pixel size while keeping smart crop and your current focal point.</p></div></div><form id="custom-form" className="custom-form mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto]" onSubmit={submitCustom}><label className="grid gap-1 text-sm"><span>Width</span><input id="custom-width" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" type="number" min="64" max="8192" value={customWidth} inputMode="numeric" required onChange={(event: any) => updateWidth(Number(event.currentTarget.value))} /></label><label className="grid gap-1 text-sm"><span>Height</span><input id="custom-height" className="rounded-lg border border-slate-700 bg-slate-950 px-3 py-2" type="number" min="64" max="8192" value={customHeight} inputMode="numeric" required onChange={(event: any) => updateHeight(Number(event.currentTarget.value))} /></label><label className="ratio-lock flex items-center gap-2 self-end rounded-lg border border-slate-700 px-3 py-2 text-sm"><input id="lock-ratio" type="checkbox" checked={lockRatio} onChange={(event: any) => { const checked = event.currentTarget.checked; setLockRatio(checked); if (checked) setLockedRatio(customWidth / Math.max(1, customHeight)) }} /><span>Lock aspect ratio</span></label><div className="ratio-presets flex flex-wrap gap-2 md:col-span-3" aria-label="Quick aspect ratios">{[[1, 1], [4, 5], [9, 16], [16, 9], [2, 3], [3, 4]].map(([w, h]) => <button key={`${w}/${h}`} type="button" data-ratio={`${w}/${h}`} className="rounded-lg border border-slate-700 px-3 py-1.5 text-xs" onClick={() => setRatio(w / h)}>{w}:{h}</button>)}</div><button className="primary custom-generate rounded-xl bg-cyan-500 px-4 py-2 font-semibold text-slate-950 disabled:opacity-40 md:col-span-3 md:w-fit" type="submit" disabled={engine.busy}>Generate custom size</button><small id="custom-error" className="form-error text-sm text-rose-300 md:col-span-3" aria-live="polite">{customError}</small></form></section> : null}
+
+          {menu === 'store' ? <div className="mt-5"><StoreAssetsPanel /></div> : null}
+
+          {menu !== 'store' ? <><div id="grid" className="grid mt-5 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">{visibleResults.map((item: Generated) => <ResultCard key={item.preset.id} item={item} onDelete={engine.removeCustom} />)}</div>{!visibleResults.length && menu === 'custom' ? <p id="empty-state" className="empty-state mt-5 rounded-xl border border-dashed border-slate-800 p-6 text-center text-sm text-slate-500">No sizes generated in this category yet.</p> : null}</> : null}
+        </section>
+      </div>
+    </main>
+  )
 }
