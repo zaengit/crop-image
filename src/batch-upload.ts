@@ -1,4 +1,3 @@
-import './batch-upload.css'
 import './enhancement-bridge'
 import './store-global-enhance'
 
@@ -7,11 +6,14 @@ const pick = document.querySelector<HTMLButtonElement>('#pick')
 const dropzone = document.querySelector<HTMLElement>('#dropzone')
 const batch = document.querySelector<HTMLElement>('#image-batch')
 
-if (fileInput) fileInput.multiple = false
+if (fileInput) {
+  fileInput.multiple = false
+  fileInput.removeAttribute('multiple')
+}
 if (pick) pick.textContent = 'Choose image'
 const dropCopy = dropzone?.querySelector<HTMLParagraphElement>('p')
 if (dropCopy) dropCopy.textContent = 'or drop an image here'
 
-// Global Enhance is a single-master-image workflow. App Store assets keep
-// their own multi-file inputs inside the Store section.
-if (batch) batch.hidden = true
+// The application uses one active master image. Remove the legacy batch UI
+// entirely instead of keeping a hidden multi-image surface in the document.
+batch?.remove()
