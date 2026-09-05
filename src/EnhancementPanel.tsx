@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { DEFAULT_ENHANCEMENT, type EnhancementSettings } from './enhance'
 
 type Props = {
   visible: boolean
   settings: EnhancementSettings
   status: string
+  onPreviewChange: (settings: EnhancementSettings) => void
   onApply: (settings: EnhancementSettings, reason?: string) => void
   onAuto: () => void
   onReset: () => void
@@ -44,31 +45,28 @@ export function enhancementPreviewFilter(settings: EnhancementSettings, comparin
 export function EnhancementPanel(props: Props) {
   const [draft, setDraft] = useState<EnhancementSettings>({ ...props.settings })
   const [mode, setMode] = useState<EnhancementMode>(null)
-  const timerRef = useRef<number | undefined>(undefined)
 
-  useEffect(() => setDraft({ ...props.settings }), [props.settings])
-  useEffect(() => () => {
-    if (timerRef.current) window.clearTimeout(timerRef.current)
-  }, [])
+  useEffect(() => {
+    const next = { ...props.settings }
+    setDraft(next)
+    props.onPreviewChange(next)
+  }, [props.settings])
 
   if (!props.visible) return null
 
   const applyRange = (key: keyof EnhancementSettings, value: number, commit: boolean) => {
     const next = { ...draft, [key]: value } as EnhancementSettings
     setDraft(next)
+    props.onPreviewChange(next)
+    if (!commit) return
     const heavy = key === 'denoise' && value >= 20
-    if (timerRef.current) window.clearTimeout(timerRef.current)
-    if (heavy && !commit) return
-    if (commit) {
-      props.onApply(next, heavy ? 'Applying AI enhancement…' : 'Applying enhancement…')
-      return
-    }
-    timerRef.current = window.setTimeout(() => props.onApply(next, 'Applying enhancement…'), 140)
+    props.onApply(next, heavy ? 'Applying AI enhancement…' : 'Applying enhancement…')
   }
 
   const toggle = (item: typeof toggles[number]) => {
     const next = { ...draft, [item.key]: !Boolean(draft[item.key]) } as EnhancementSettings
     setDraft(next)
+    props.onPreviewChange(next)
     props.onApply(next, Boolean(next[item.key]) ? item.activeReason : 'Applying enhancement…')
   }
 
@@ -82,9 +80,10 @@ export function EnhancementPanel(props: Props) {
   }
 
   const resetEnhancement = () => {
-    if (timerRef.current) window.clearTimeout(timerRef.current)
+    const next = { ...DEFAULT_ENHANCEMENT }
     setMode(null)
-    setDraft({ ...DEFAULT_ENHANCEMENT })
+    setDraft(next)
+    props.onPreviewChange(next)
     props.onCompareChange(false)
     props.onReset()
   }
