@@ -3,6 +3,7 @@
 import { FilesetResolver, ImageSegmenter } from '@mediapipe/tasks-vision'
 import initWasm, { smart_crop_png } from './wasm/pkg/crop_image_wasm.js'
 import { detectFaces, type FocusRegion } from './ai'
+import { aiEnhanceFaces } from './ai-face-enhance'
 import { aiRestoreImage } from './ai-restore'
 import { aiUpscale2x } from './ai-upscale'
 import { PASSPORT_PRESETS, SOCIAL_PRESETS, type ImagePreset } from './presets'
@@ -21,6 +22,12 @@ type UpscaleInfo = {
 
 type RestorationInfo = {
   method: 'ai' | 'local'
+  fallback?: string
+}
+
+type FaceEnhanceInfo = {
+  method: 'ai' | 'local'
+  faces: number
   fallback?: string
 }
 
@@ -270,6 +277,7 @@ async function rebuildEnhancedImage(settings: EnhancementSettings) {
   let width = sourceWidth
   let height = sourceHeight
   let restoration: RestorationInfo | undefined
+  let faceEnhance: FaceEnhanceInfo | undefined
   let upscale: UpscaleInfo | undefined
 
   if (useAiRestore) {
@@ -295,6 +303,28 @@ async function rebuildEnhancedImage(settings: EnhancementSettings) {
     }
   }
 
+  if (settings.faceEnhance) {
+    if (!cachedFocus.length) {
+      faceEnhance = { method: 'local', faces: 0, fallback: 'No face detected' }
+    } else {
+      try {
+        self.postMessage({ type: 'status', message: `AI enhancing ${cachedFocus.length} detected face${cachedFocus.length > 1 ? 's' : ''}…` })
+        const enhanced = await aiEnhanceFaces(pixels, width, height, cachedFocus, (done, total) => {
+          self.postMessage({ type: 'status', message: `AI face enhancement ${done} / ${total}…` })
+        })
+        pixels = enhanced.rgba
+        faceEnhance = { method: 'ai', faces: enhanced.faces }
+      } catch (error) {
+        console.warn('AI face enhancement unavailable; keeping local face enhancement.', error)
+        faceEnhance = {
+          method: 'local',
+          faces: cachedFocus.length,
+          fallback: error instanceof Error ? error.message : String(error),
+        }
+      }
+    }
+  }
+
   if (settings.upscale2x) {
     const scaled = await upscaleRgba(pixels, width, height)
     pixels = scaled.rgba
@@ -315,15 +345,15 @@ async function rebuildEnhancedImage(settings: EnhancementSettings) {
   cachedPersonMask = undefined
   passportRgba = undefined
   if (passportBackground !== 'original') await composePassportBackground(passportBackground)
-  return { upscale, restoration }
+  return { upscale, restoration, faceEnhance }
 }
 
 async function applyEnhancement(settings: EnhancementSettings, auto = false) {
   if (!sourceRgba) throw new Error('Enhancement requires a loaded image')
   enhancementSettings = { ...DEFAULT_ENHANCEMENT, ...settings }
   self.postMessage({ type: 'status', message: auto ? 'Applying Auto Enhance…' : 'Applying global enhancement…' })
-  const { upscale, restoration } = await rebuildEnhancedImage(enhancementSettings)
-  self.postMessage({ type: 'enhancement-settings', settings: enhancementSettings, auto, upscale, restoration })
+  const { upscale, restoration, faceEnhance } = await rebuildEnhancedImage(enhancementSettings)
+  self.postMessage({ type: 'enhancement-settings', settings: enhancementSettings, auto, upscale, restoration, faceEnhance })
   await regenerateActive(currentMode)
 }
 
