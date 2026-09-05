@@ -9,10 +9,15 @@ import { autoEnhancement, DEFAULT_ENHANCEMENT, enhanceRgba, type EnhancementSett
 type OutputFormat = 'png' | 'jpeg' | 'webp'
 type Mode = { kind: 'focus'; x: number; y: number } | { kind: 'auto' }
 
+const MAX_UPSCALE_PIXELS = 24_000_000
+const MAX_UPSCALE_EDGE = 8192
+
 let wasmReady: Promise<unknown> | undefined
 let segmenterReady: Promise<ImageSegmenter> | undefined
 let segmenterCanvas: OffscreenCanvas | undefined
 let sourceRgba: Uint8ClampedArray | undefined
+let sourceWidth = 0
+let sourceHeight = 0
 let cachedRgba: Uint8ClampedArray | undefined
 let cachedWidth = 0
 let cachedHeight = 0
@@ -86,6 +91,37 @@ function parseHexColor(value: string) {
   const hex = value.replace('#', '')
   if (!/^[0-9a-fA-F]{6}$/.test(hex)) throw new Error('Invalid background color')
   return { r: Number.parseInt(hex.slice(0, 2), 16), g: Number.parseInt(hex.slice(2, 4), 16), b: Number.parseInt(hex.slice(4, 6), 16) }
+}
+
+function upscaleDimensions(width: number, height: number) {
+  const pixels = width * height
+  const byPixels = pixels > 0 ? Math.sqrt(MAX_UPSCALE_PIXELS / pixels) : 1
+  const byEdge = MAX_UPSCALE_EDGE / Math.max(1, width, height)
+  const scale = Math.max(1, Math.min(2, byPixels, byEdge))
+  return {
+    scale,
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  }
+}
+
+async function upscaleRgba(source: Uint8ClampedArray, width: number, height: number) {
+  const target = upscaleDimensions(width, height)
+  if (target.scale <= 1.001) return { rgba: new Uint8ClampedArray(source), width, height, scale: 1 }
+
+  const sourceCanvas = new OffscreenCanvas(width, height)
+  const sourceCtx = sourceCanvas.getContext('2d')
+  if (!sourceCtx) throw new Error('Unable to create upscale source canvas')
+  sourceCtx.putImageData(new ImageData(new Uint8ClampedArray(source), width, height), 0, 0)
+
+  const targetCanvas = new OffscreenCanvas(target.width, target.height)
+  const targetCtx = targetCanvas.getContext('2d', { willReadFrequently: true })
+  if (!targetCtx) throw new Error('Unable to create upscale output canvas')
+  targetCtx.imageSmoothingEnabled = true
+  targetCtx.imageSmoothingQuality = 'high'
+  targetCtx.drawImage(sourceCanvas, 0, 0, width, height, 0, 0, target.width, target.height)
+  const image = targetCtx.getImageData(0, 0, target.width, target.height)
+  return { rgba: image.data, width: target.width, height: target.height, scale: target.scale }
 }
 
 async function ensurePersonMask() {
@@ -177,15 +213,37 @@ async function regenerateActive(mode: Mode) {
   } finally { generating = false }
 }
 
+async function rebuildEnhancedImage(settings: EnhancementSettings) {
+  if (!sourceRgba) throw new Error('Enhancement requires a loaded image')
+  let pixels = enhanceRgba(sourceRgba, sourceWidth, sourceHeight, settings, cachedFocus)
+  let width = sourceWidth
+  let height = sourceHeight
+  let upscale: { scale: number; width: number; height: number } | undefined
+
+  if (settings.upscale2x) {
+    self.postMessage({ type: 'status', message: 'Upscaling working image locally…' })
+    const scaled = await upscaleRgba(pixels, width, height)
+    pixels = scaled.rgba
+    width = scaled.width
+    height = scaled.height
+    upscale = { scale: scaled.scale, width, height }
+  }
+
+  cachedRgba = pixels
+  cachedWidth = width
+  cachedHeight = height
+  cachedPersonMask = undefined
+  passportRgba = undefined
+  if (passportBackground !== 'original') await composePassportBackground(passportBackground)
+  return upscale
+}
+
 async function applyEnhancement(settings: EnhancementSettings, auto = false) {
   if (!sourceRgba) throw new Error('Enhancement requires a loaded image')
   enhancementSettings = { ...DEFAULT_ENHANCEMENT, ...settings }
   self.postMessage({ type: 'status', message: auto ? 'Applying Auto Enhance…' : 'Applying global enhancement…' })
-  cachedRgba = enhanceRgba(sourceRgba, cachedWidth, cachedHeight, enhancementSettings, cachedFocus)
-  cachedPersonMask = undefined
-  passportRgba = undefined
-  if (passportBackground !== 'original') await composePassportBackground(passportBackground)
-  self.postMessage({ type: 'enhancement-settings', settings: enhancementSettings, auto })
+  const upscale = await rebuildEnhancedImage(enhancementSettings)
+  self.postMessage({ type: 'enhancement-settings', settings: enhancementSettings, auto, upscale })
   await regenerateActive(currentMode)
 }
 
@@ -236,8 +294,10 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
 
     outputFormat = event.data.format ?? outputFormat
     outputQuality = Math.min(1, Math.max(0.1, event.data.quality ?? outputQuality))
-    cachedWidth = event.data.width
-    cachedHeight = event.data.height
+    sourceWidth = event.data.width
+    sourceHeight = event.data.height
+    cachedWidth = sourceWidth
+    cachedHeight = sourceHeight
     sourceRgba = new Uint8ClampedArray(event.data.rgba)
     cachedRgba = new Uint8ClampedArray(sourceRgba)
     enhancementSettings = { ...DEFAULT_ENHANCEMENT }
