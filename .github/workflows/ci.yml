@@ -12,7 +12,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -55,3 +55,11 @@ jobs:
 
       - name: Build application
         run: npm run build:web
+
+      - name: Install Chromium for smoke test
+        run: npx -y playwright@1.55.0 install --with-deps chromium
+
+      - name: Production browser smoke test
+        run: |
+          npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/crop-image-preview.log 2>&1 &
+          npx -y @playwright/test@1.55.0 test tests/smoke.spec.js --reporter=line
