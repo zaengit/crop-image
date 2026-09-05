@@ -15,17 +15,10 @@
       </header>
 
       <section class="upload-card" id="dropzone">
-        <input id="file" type="file" accept="image/*" multiple hidden />
-        <button id="pick" class="primary">Choose images</button>
-        <p>or drop images here</p>
+        <input id="file" type="file" accept="image/*" hidden />
+        <button id="pick" class="primary">Choose image</button>
+        <p>or drop an image here</p>
         <small id="status" aria-live="polite">Ready</small>
-      </section>
-      <section id="image-batch" class="image-batch" hidden aria-label="Uploaded images">
-        <div class="image-batch-head">
-          <div><strong>Uploaded images</strong><small id="image-batch-count"></small></div>
-          <button id="image-batch-add" class="secondary compact" type="button">Add images</button>
-        </div>
-        <div id="image-batch-list" class="image-batch-list"></div>
       </section>
 
       <section id="focus-editor" class="focus-editor" hidden>
@@ -73,7 +66,7 @@
 
         <section id="social-panel" class="menu-panel">
           <div class="panel-heading">
-            <div><h3>Social media</h3><p>Choose an uploaded image, adjust the focal point, then generate ready-to-use social media sizes.</p></div>
+            <div><h3>Social media</h3><p>Adjust the focal point if needed, then generate ready-to-use social media sizes.</p></div>
             <button id="generate-social" class="primary" type="button">Generate crop</button>
           </div>
         </section>
@@ -143,7 +136,6 @@
         <p id="empty-state" class="empty-state" hidden>No sizes generated in this category yet.</p>
       </section>
     </main>
-    <script type="module" src="/src/batch-upload.ts"></script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
