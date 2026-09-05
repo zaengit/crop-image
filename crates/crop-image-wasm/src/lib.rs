@@ -52,9 +52,19 @@ fn face_group_bounds(regions: &[FocusRegion], padding: f32) -> Option<Bounds> {
 fn bounds_focus(bounds: Bounds) -> Point {
     Point {
         x: ((bounds.left + bounds.right) * 0.5).clamp(0.0, 1.0),
-        // Bias slightly upward so portrait crops keep comfortable head room.
         y: (bounds.top * 0.53 + bounds.bottom * 0.47).clamp(0.0, 1.0),
     }
+}
+
+fn subject_focus(regions: &[FocusRegion]) -> Option<Point> {
+    regions
+        .iter()
+        .filter(|r| r.kind == "subject" && r.confidence >= 0.3)
+        .max_by(|a, b| a.confidence.total_cmp(&b.confidence))
+        .map(|r| Point {
+            x: (r.x + r.width * 0.5).clamp(0.0, 1.0),
+            y: (r.y + r.height * 0.5).clamp(0.0, 1.0),
+        })
 }
 
 fn saliency_focus(rgba: &[u8], width: u32, height: u32) -> Point {
@@ -191,6 +201,8 @@ pub fn smart_crop_png(
         Point { x: manual_x.clamp(0.0, 1.0), y: manual_y.clamp(0.0, 1.0) }
     } else if let Some(bounds) = face_bounds {
         bounds_focus(bounds)
+    } else if let Some(subject) = subject_focus(&regions) {
+        subject
     } else {
         saliency_focus(rgba, src_width, src_height)
     };
@@ -242,6 +254,21 @@ mod tests {
         let bounds = face_group_bounds(&faces, 0.1).unwrap();
         let focus = bounds_focus(bounds);
         assert!((focus.x - 0.5).abs() < 0.02);
+    }
+
+    #[test]
+    fn ai_subject_focus_uses_object_center() {
+        let regions = vec![FocusRegion {
+            x: 0.68,
+            y: 0.2,
+            width: 0.2,
+            height: 0.4,
+            confidence: 0.88,
+            kind: "subject".into(),
+        }];
+        let focus = subject_focus(&regions).unwrap();
+        assert!((focus.x - 0.78).abs() < 0.001);
+        assert!((focus.y - 0.4).abs() < 0.001);
     }
 
     #[test]
