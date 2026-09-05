@@ -1,10 +1,14 @@
+import { getOrtRuntime } from './ai-runtime'
+
 const SCALE = 2
 const TILE = 128
 const OVERLAP = 8
 
 type OrtModule = typeof import('onnxruntime-web/wasm')
-let ortPromise: Promise<OrtModule> | undefined
-let sessionPromise: Promise<Awaited<ReturnType<OrtModule['InferenceSession']['create']>>> | undefined
+type OrtSession = Awaited<ReturnType<OrtModule['InferenceSession']['create']>>
+type RuntimeSession = { ort: OrtModule; session: OrtSession }
+
+let sessionPromise: Promise<RuntimeSession> | undefined
 
 type CachedAiUpscale = AiUpscaleResult | (() => Promise<AiUpscaleResult>)
 const cachedUpscales = new WeakMap<Uint8ClampedArray, CachedAiUpscale>()
@@ -20,11 +24,6 @@ export function cacheAiUpscale(source: Uint8ClampedArray, result: CachedAiUpscal
   cachedUpscales.set(source, result)
 }
 
-function getOrt() {
-  ortPromise ??= import('onnxruntime-web/wasm')
-  return ortPromise
-}
-
 function clampByte(value: number) {
   return Math.max(0, Math.min(255, Math.round(value)))
 }
@@ -32,13 +31,13 @@ function clampByte(value: number) {
 async function getSession() {
   if (!sessionPromise) {
     sessionPromise = (async () => {
-      const ort = await getOrt()
-      ort.env.wasm.numThreads = 1
+      const runtime = await getOrtRuntime()
       const modelUrl = `${import.meta.env.BASE_URL}models/realesrgan_x2plus.onnx`
-      return ort.InferenceSession.create(modelUrl, {
-        executionProviders: ['wasm'],
+      const session = await runtime.ort.InferenceSession.create(modelUrl, {
+        executionProviders: [runtime.backend],
         graphOptimizationLevel: 'all',
       })
+      return { ort: runtime.ort, session }
     })().catch((error) => {
       sessionPromise = undefined
       throw error
@@ -158,7 +157,7 @@ export async function aiUpscale2x(
     }
   }
 
-  const [ort, session] = await Promise.all([getOrt(), getSession()])
+  const { ort, session } = await getSession()
   const destinationWidth = width * SCALE
   const destinationHeight = height * SCALE
   const destination = new Uint8ClampedArray(destinationWidth * destinationHeight * 4)
