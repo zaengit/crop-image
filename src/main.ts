@@ -106,19 +106,17 @@ function workingDimensions(width: number, height: number) {
   }
 }
 
-async function decode(file: File): Promise<DecodedImage> {
-  const bitmap = await createImageBitmap(file)
-  const sourceWidth = bitmap.width
-  const sourceHeight = bitmap.height
+function renderDecodedSource(source: CanvasImageSource, sourceWidth: number, sourceHeight: number): DecodedImage {
+  if (!sourceWidth || !sourceHeight) throw new Error('Image has invalid dimensions.')
   const target = workingDimensions(sourceWidth, sourceHeight)
   const canvas = document.createElement('canvas')
   canvas.width = target.width
   canvas.height = target.height
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })!
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  if (!ctx) throw new Error('This browser could not create an image canvas.')
   ctx.imageSmoothingEnabled = true
   ctx.imageSmoothingQuality = 'high'
-  ctx.drawImage(bitmap, 0, 0, target.width, target.height)
-  bitmap.close()
+  ctx.drawImage(source, 0, 0, target.width, target.height)
   const image = ctx.getImageData(0, 0, target.width, target.height)
   return {
     rgba: image.data,
@@ -127,6 +125,53 @@ async function decode(file: File): Promise<DecodedImage> {
     sourceWidth,
     sourceHeight,
     scaled: target.scale < 0.999,
+  }
+}
+
+function decodeWithImageElement(file: File): Promise<DecodedImage> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file)
+    const image = new Image()
+    const cleanup = () => URL.revokeObjectURL(url)
+    image.onload = () => {
+      try {
+        resolve(renderDecodedSource(image, image.naturalWidth, image.naturalHeight))
+      } catch (error) {
+        reject(error)
+      } finally {
+        cleanup()
+      }
+    }
+    image.onerror = () => {
+      cleanup()
+      reject(new Error('This browser could not decode the selected image. Try JPEG, PNG, or WebP.'))
+    }
+    image.src = url
+  })
+}
+
+async function decode(file: File): Promise<DecodedImage> {
+  let bitmapError: unknown
+  if (typeof createImageBitmap === 'function') {
+    try {
+      const bitmap = await createImageBitmap(file)
+      try {
+        return renderDecodedSource(bitmap, bitmap.width, bitmap.height)
+      } finally {
+        bitmap.close()
+      }
+    } catch (error) {
+      bitmapError = error
+      console.warn('createImageBitmap failed; retrying with image-element decoder.', error)
+    }
+  }
+
+  try {
+    return await decodeWithImageElement(file)
+  } catch (fallbackError) {
+    const primary = bitmapError instanceof Error ? bitmapError.message : bitmapError ? String(bitmapError) : ''
+    const fallback = fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+    throw new Error(primary ? `${fallback} Primary decoder: ${primary}` : fallback)
   }
 }
 
@@ -469,7 +514,8 @@ async function process(file: File) {
       }
     }
     worker.onerror = (event) => {
-      status.textContent = `Error: ${event.message}`
+      const detail = event.message || 'Crop worker failed to start in this browser.'
+      status.textContent = `Error: ${detail}`
       pick.disabled = false
       downloadAll.disabled = generated.length === 0
     }
@@ -482,7 +528,7 @@ async function process(file: File) {
       quality: currentQuality(),
     }, [image.rgba.buffer])
   } catch (error) {
-    status.textContent = `Error: ${error instanceof Error ? error.message : String(error)}`
+    status.textContent = `Error reading image: ${error instanceof Error ? error.message : String(error)}`
     pick.disabled = false
     downloadAll.disabled = generated.length === 0
   }
