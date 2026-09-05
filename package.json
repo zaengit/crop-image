@@ -16,10 +16,16 @@
   "dependencies": {
     "@mediapipe/tasks-vision": "1.0.1",
     "fflate": "0.8.3",
-    "onnxruntime-web": "1.22.0"
+    "onnxruntime-web": "1.22.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@playwright/test": "1.55.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "tailwindcss": "^4.3.3",
     "typescript": "5.9.2",
     "vite": "7.1.0"
   }
