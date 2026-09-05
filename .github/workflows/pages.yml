@@ -34,6 +34,7 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.98.1
           targets: wasm32-unknown-unknown
 
       - name: Install wasm-pack
@@ -43,6 +44,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
 
       - name: Fetch and verify AI models
         run: npm run model:fetch
@@ -55,6 +59,11 @@ jobs:
 
       - name: Build site
         run: npm run build:web
+
+      - name: Verify production worker artifact
+        run: |
+          test -n "$(find dist/assets -maxdepth 1 -name 'worker-*.js' -print -quit)"
+          test -z "$(find dist -name 'worker-*.ts' -print -quit)"
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
