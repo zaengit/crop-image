@@ -8,7 +8,7 @@ const models = [
   {
     name: 'UltraFace',
     target: resolve('public/models/version-RFB-320.onnx'),
-    url: 'https://raw.githubusercontent.com/onnx/models/4c46cd00fbdb7cd30b6c1c17ab54f2e1f4f7b177/validated/vision/body_analysis/ultraface/models/version-RFB-320.onnx',
+    url: 'https://github.com/onnx/models/raw/4c46cd00fbdb7cd30b6c1c17ab54f2e1f4f7b177/validated/vision/body_analysis/ultraface/models/version-RFB-320.onnx',
     sha256: '34cd7e60aeff28744c657de7a3dc64e872d506741de66987f3426f2b79f88017',
   },
   {
@@ -20,7 +20,7 @@ const models = [
   {
     name: 'Real-ESRGAN 2x',
     target: resolve('public/models/realesrgan_x2plus.onnx'),
-    url: 'https://raw.githubusercontent.com/net2cn/Real-ESRGAN_GUI/0c4fd78d29cb4d6afde9f852195a71e58b50f53c/Real-ESRGAN_GUI/models/realesrgan_x2plus.onnx',
+    url: 'https://github.com/net2cn/Real-ESRGAN_GUI/raw/0c4fd78d29cb4d6afde9f852195a71e58b50f53c/Real-ESRGAN_GUI/models/realesrgan_x2plus.onnx',
     sha256: '012b544d2ecf1433480165b3981223b3168926343c93a6cd688b11379f16551c',
   },
 ]
