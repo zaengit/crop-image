@@ -1,8 +1,6 @@
 import React from 'react'
 import { createRoot } from 'react-dom/client'
 import './tailwind.css'
-import './style.css'
-import './enhancement.css'
 import { App } from './App'
 
 // Transitional compatibility for migrated modules that still call React.useState/useRef.
