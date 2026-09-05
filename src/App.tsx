@@ -84,21 +84,6 @@ export function App() {
           </div>
         </header>
 
-        <section className="hero-panel relative overflow-hidden rounded-[28px] bg-neutral-950 px-6 py-8 text-white shadow-[0_24px_70px_rgba(0,0,0,0.16)] sm:px-10 sm:py-12 lg:flex lg:items-end lg:justify-between lg:gap-12">
-          <div className="relative z-10 max-w-3xl">
-            <p className="text-xs font-bold uppercase tracking-[0.24em] text-neutral-400">Local • private • ready for every format</p>
-            <h1 className="mt-4 max-w-3xl text-4xl font-semibold leading-[0.98] tracking-[-0.045em] sm:text-6xl lg:text-7xl">Upload once.<br className="hidden sm:block" /> Get every size you need.</h1>
-            <p className="mt-5 max-w-xl text-base leading-7 text-neutral-300 sm:text-lg">Smart crop keeps the subject in frame while you prepare social posts, passport photos, custom sizes, and app-store assets.</p>
-          </div>
-          <div className="relative z-10 mt-8 grid max-w-sm grid-cols-3 gap-2 border-t border-white/15 pt-4 text-[11px] font-medium uppercase tracking-[0.14em] text-neutral-400 lg:mt-0 lg:min-w-[330px]">
-            <div><span className="mb-2 block text-xl font-semibold tracking-normal text-white">01</span>Upload</div>
-            <div><span className="mb-2 block text-xl font-semibold tracking-normal text-white">02</span>Focus</div>
-            <div><span className="mb-2 block text-xl font-semibold tracking-normal text-white">03</span>Export</div>
-          </div>
-          <div className="pointer-events-none absolute -right-28 -top-32 h-80 w-80 rounded-full border border-white/10" aria-hidden="true" />
-          <div className="pointer-events-none absolute -right-12 -top-16 h-48 w-48 rounded-full border border-white/10" aria-hidden="true" />
-        </section>
-
         <UploadDropzone busy={engine.busy} status={engine.status} onFile={processFile} />
 
         <EnhancementPanel
