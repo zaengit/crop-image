@@ -7,6 +7,7 @@ import { aiRestoreImage } from './ai-restore'
 import { aiUpscale2x } from './ai-upscale'
 import { hasGlobalAdjustments, runGlobalAdjustmentsWebGpu } from './gpu-adjustments'
 import { runDetailWebGpu } from './gpu-detail'
+import { runEnhancementPipelineWebGpu, shouldUseResidentPipeline } from './gpu-enhancement-pipeline'
 import { adaptiveLowLightAccelerated } from './low-light'
 import { PASSPORT_PRESETS, SOCIAL_PRESETS, type ImagePreset } from './presets'
 import { autoEnhancement, DEFAULT_ENHANCEMENT, detailStrengths, enhanceRgba, type EnhancementSettings } from './enhance'
@@ -304,49 +305,71 @@ async function generatePresets(presets: ImagePreset[], revision: number, manualF
 async function buildEnhancedImage(settings: EnhancementSettings): Promise<EnhancedImage> {
   if (!sourceRgba) throw new Error('Enhancement requires a loaded image')
 
+  const useAiRestore = settings.denoise >= 20 || settings.deblur || settings.restorePhoto
+  const localSettings = useAiRestore ? { ...settings, denoise: 0, deblur: false } : settings
+  const residentDetail = detailStrengths(localSettings)
+  let pixels: Uint8ClampedArray | undefined
+
+  if (!localSettings.faceEnhance && shouldUseResidentPipeline(localSettings, residentDetail.denoise, residentDetail.sharpen)) {
+    try {
+      self.postMessage({ type: 'status', message: 'Applying GPU enhancement pipeline…' })
+      pixels = await runEnhancementPipelineWebGpu(
+        sourceRgba,
+        sourceWidth,
+        sourceHeight,
+        localSettings,
+        residentDetail.denoise,
+        residentDetail.sharpen,
+      )
+    } catch (error) {
+      console.warn('GPU-resident enhancement unavailable; using staged fallback.', error)
+    }
+  }
+
   let enhancementSource = sourceRgba
   let effectiveSettings = settings
-  if (settings.lowLight) {
-    self.postMessage({ type: 'status', message: 'Optimizing low light…' })
-    const lowLight = await adaptiveLowLightAccelerated(sourceRgba)
-    enhancementSource = lowLight.rgba
-    effectiveSettings = { ...settings, lowLight: false }
-  }
 
-  if (hasGlobalAdjustments(effectiveSettings)) {
-    try {
-      self.postMessage({ type: 'status', message: 'Applying GPU adjustments…' })
-      enhancementSource = await runGlobalAdjustmentsWebGpu(enhancementSource, effectiveSettings)
-      effectiveSettings = {
-        ...effectiveSettings,
-        brightness: 0,
-        contrast: 0,
-        highlights: 0,
-        shadows: 0,
-        saturation: 0,
-        temperature: 0,
+  if (!pixels) {
+    if (settings.lowLight) {
+      self.postMessage({ type: 'status', message: 'Optimizing low light…' })
+      const lowLight = await adaptiveLowLightAccelerated(sourceRgba)
+      enhancementSource = lowLight.rgba
+      effectiveSettings = { ...settings, lowLight: false }
+    }
+
+    if (hasGlobalAdjustments(effectiveSettings)) {
+      try {
+        self.postMessage({ type: 'status', message: 'Applying GPU adjustments…' })
+        enhancementSource = await runGlobalAdjustmentsWebGpu(enhancementSource, effectiveSettings)
+        effectiveSettings = {
+          ...effectiveSettings,
+          brightness: 0,
+          contrast: 0,
+          highlights: 0,
+          shadows: 0,
+          saturation: 0,
+          temperature: 0,
+        }
+      } catch (error) {
+        console.warn('WebGPU global adjustments unavailable; using CPU fallback.', error)
       }
-    } catch (error) {
-      console.warn('WebGPU global adjustments unavailable; using CPU fallback.', error)
     }
-  }
 
-  const useAiRestore = effectiveSettings.denoise >= 20 || effectiveSettings.deblur || effectiveSettings.restorePhoto
-  const localSettings = useAiRestore ? { ...effectiveSettings, denoise: 0, deblur: false } : effectiveSettings
-  const detail = detailStrengths(localSettings)
-  let pixels: Uint8ClampedArray
+    const stagedLocalSettings = useAiRestore ? { ...effectiveSettings, denoise: 0, deblur: false } : effectiveSettings
+    const detail = detailStrengths(stagedLocalSettings)
 
-  if ((detail.denoise > 0 || detail.sharpen > 0) && !localSettings.faceEnhance) {
-    const toned = enhanceRgba(enhancementSource, sourceWidth, sourceHeight, localSettings, cachedFocus, { skipDetail: true })
-    try {
-      self.postMessage({ type: 'status', message: 'Applying GPU detail enhancement…' })
-      pixels = await runDetailWebGpu(toned, sourceWidth, sourceHeight, detail.denoise, detail.sharpen)
-    } catch (error) {
-      console.warn('WebGPU detail enhancement unavailable; using CPU fallback.', error)
-      pixels = enhanceRgba(enhancementSource, sourceWidth, sourceHeight, localSettings, cachedFocus)
+    if ((detail.denoise > 0 || detail.sharpen > 0) && !stagedLocalSettings.faceEnhance) {
+      const toned = enhanceRgba(enhancementSource, sourceWidth, sourceHeight, stagedLocalSettings, cachedFocus, { skipDetail: true })
+      try {
+        self.postMessage({ type: 'status', message: 'Applying GPU detail enhancement…' })
+        pixels = await runDetailWebGpu(toned, sourceWidth, sourceHeight, detail.denoise, detail.sharpen)
+      } catch (error) {
+        console.warn('WebGPU detail enhancement unavailable; using CPU fallback.', error)
+        pixels = enhanceRgba(enhancementSource, sourceWidth, sourceHeight, stagedLocalSettings, cachedFocus)
+      }
+    } else {
+      pixels = enhanceRgba(enhancementSource, sourceWidth, sourceHeight, stagedLocalSettings, cachedFocus)
     }
-  } else {
-    pixels = enhanceRgba(enhancementSource, sourceWidth, sourceHeight, localSettings, cachedFocus)
   }
 
   let width = sourceWidth
@@ -357,7 +380,7 @@ async function buildEnhancedImage(settings: EnhancementSettings): Promise<Enhanc
 
   if (useAiRestore) {
     try {
-      const strength = Math.min(0.9, 0.42 + Math.min(0.25, effectiveSettings.denoise / 250) + (effectiveSettings.deblur ? 0.14 : 0) + (effectiveSettings.restorePhoto ? 0.08 : 0))
+      const strength = Math.min(0.9, 0.42 + Math.min(0.25, settings.denoise / 250) + (settings.deblur ? 0.14 : 0) + (settings.restorePhoto ? 0.08 : 0))
       self.postMessage({ type: 'status', message: 'Loading AI restoration model…' })
       const restored = await aiRestoreImage(pixels, width, height, strength, (done, total) => {
         self.postMessage({ type: 'status', message: `AI restoring… ${progressPercent(done, total)}%` })
@@ -367,7 +390,7 @@ async function buildEnhancedImage(settings: EnhancementSettings): Promise<Enhanc
     } catch (error) {
       console.warn('AI restoration unavailable; using local denoise/deblur fallback.', error)
       self.postMessage({ type: 'status', message: 'AI restoration unavailable. Using local fallback…' })
-      pixels = enhanceRgba(enhancementSource, sourceWidth, sourceHeight, effectiveSettings, cachedFocus)
+      pixels = enhanceRgba(sourceRgba, sourceWidth, sourceHeight, settings, cachedFocus)
       restoration = { method: 'local', fallback: error instanceof Error ? error.message : String(error) }
     }
   }
