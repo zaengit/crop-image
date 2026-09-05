@@ -43,18 +43,30 @@ export function createCropWorker(url: URL) {
   let inFlight: PendingOperation | undefined
   let terminated = false
 
+  const postNative = (message: unknown, transferOrOptions?: TransferOptions) => {
+    if (transferOrOptions === undefined) {
+      nativePostMessage(message)
+      return
+    }
+
+    // Preserve the classic transfer-list overload used by the upload path.
+    // Some mobile browsers are less reliable with { transfer: [...] }.
+    if (Array.isArray(transferOrOptions)) {
+      const withTransferList = nativePostMessage as unknown as (message: unknown, transfer: Transferable[]) => void
+      withTransferList(message, transferOrOptions)
+      return
+    }
+
+    const withOptions = nativePostMessage as unknown as (message: unknown, options: StructuredSerializeOptions) => void
+    withOptions(message, transferOrOptions)
+  }
+
   const dispatchNext = () => {
     if (terminated || inFlight || !queue.length) return
     const next = queue.shift()!
 
     if (next.completion) inFlight = next
-    if (next.transferOrOptions === undefined) {
-      nativePostMessage(next.message)
-    } else if (Array.isArray(next.transferOrOptions)) {
-      nativePostMessage(next.message, { transfer: next.transferOrOptions })
-    } else {
-      nativePostMessage(next.message, next.transferOrOptions)
-    }
+    postNative(next.message, next.transferOrOptions)
 
     if (!next.completion) queueMicrotask(dispatchNext)
   }
