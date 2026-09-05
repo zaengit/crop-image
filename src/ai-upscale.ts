@@ -4,7 +4,9 @@ const SCALE = 2
 const TILE = 128
 const OVERLAP = 8
 let sessionPromise: Promise<ort.InferenceSession> | undefined
-const cachedUpscales = new WeakMap<Uint8ClampedArray, AiUpscaleResult>()
+
+type CachedAiUpscale = AiUpscaleResult | (() => Promise<AiUpscaleResult>)
+const cachedUpscales = new WeakMap<Uint8ClampedArray, CachedAiUpscale>()
 
 export type AiUpscaleResult = {
   rgba: Uint8ClampedArray
@@ -13,7 +15,7 @@ export type AiUpscaleResult = {
   backend: 'realesrgan'
 }
 
-export function cacheAiUpscale(source: Uint8ClampedArray, result: AiUpscaleResult) {
+export function cacheAiUpscale(source: Uint8ClampedArray, result: CachedAiUpscale) {
   cachedUpscales.set(source, result)
 }
 
@@ -134,10 +136,17 @@ export async function aiUpscale2x(
   onProgress?: (done: number, total: number) => void,
 ): Promise<AiUpscaleResult> {
   const cached = cachedUpscales.get(source)
-  if (cached && cached.width === width * SCALE && cached.height === height * SCALE) {
+  if (cached) {
     cachedUpscales.delete(source)
-    onProgress?.(1, 1)
-    return cached
+    try {
+      const resolved = typeof cached === 'function' ? await cached() : cached
+      if (resolved.width === width * SCALE && resolved.height === height * SCALE) {
+        onProgress?.(1, 1)
+        return resolved
+      }
+    } catch (error) {
+      console.warn('Cached AI upscale could not be prepared; running a fresh upscale.', error)
+    }
   }
 
   const session = await getSession()
