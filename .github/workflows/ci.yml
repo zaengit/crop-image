@@ -74,4 +74,4 @@ jobs:
       - name: Production browser smoke test
         run: |
           npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/crop-image-preview.log 2>&1 &
-          npx playwright test tests/smoke.spec.js --reporter=line
+          npx playwright test tests/smoke.spec.ts --reporter=line
