@@ -131,12 +131,20 @@ export function autoEnhancement(source: Uint8ClampedArray): EnhancementSettings 
   }
 }
 
+export function detailStrengths(settings: EnhancementSettings) {
+  return {
+    denoise: settings.denoise + (settings.restorePhoto ? 8 : 0),
+    sharpen: settings.sharpness + (settings.deblur ? 30 : 0) + (settings.restorePhoto ? 10 : 0),
+  }
+}
+
 export function enhanceRgba(
   original: Uint8ClampedArray,
   width: number,
   height: number,
   settings: EnhancementSettings,
   faces: Array<{ x: number; y: number; width: number; height: number }> = [],
+  options: { skipDetail?: boolean } = {},
 ) {
   const base = settings.lowLight ? adaptiveLowLight(original).rgba : new Uint8ClampedArray(original)
   const out = new Uint8ClampedArray(base)
@@ -182,8 +190,12 @@ export function enhanceRgba(
     out[i + 2] = clamp(b)
   }
 
-  let processed = applyDenoise(out, width, height, settings.denoise + (settings.restorePhoto ? 8 : 0))
-  processed = applySharpen(processed, width, height, settings.sharpness + (settings.deblur ? 30 : 0) + (settings.restorePhoto ? 10 : 0))
+  let processed = out
+  if (!options.skipDetail) {
+    const detail = detailStrengths(settings)
+    processed = applyDenoise(processed, width, height, detail.denoise)
+    processed = applySharpen(processed, width, height, detail.sharpen)
+  }
 
   if (settings.faceEnhance && faces.length) {
     const faceBase = new Uint8ClampedArray(processed)
