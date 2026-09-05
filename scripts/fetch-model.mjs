@@ -8,19 +8,19 @@ const models = [
   {
     name: 'UltraFace',
     target: resolve('public/models/version-RFB-320.onnx'),
-    url: 'https://github.com/onnx/models/raw/main/validated/vision/body_analysis/ultraface/models/version-RFB-320.onnx',
+    url: 'https://github.com/onnx/models/raw/4c46cd00fbdb7cd30b6c1c17ab54f2e1f4f7b177/validated/vision/body_analysis/ultraface/models/version-RFB-320.onnx',
     sha256: '34cd7e60aeff28744c657de7a3dc64e872d506741de66987f3426f2b79f88017',
   },
   {
     name: 'Selfie Segmenter',
     target: resolve('public/models/selfie_segmenter.tflite'),
-    url: 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite',
+    url: 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/1/selfie_segmenter.tflite',
     sha256: '191ac9529ae506ee0beefa6b2c945a172dab9d07d1e802a290a4e4038226658b',
   },
   {
     name: 'Real-ESRGAN 2x',
     target: resolve('public/models/realesrgan_x2plus.onnx'),
-    url: 'https://github.com/net2cn/Real-ESRGAN_GUI/raw/refs/heads/master/Real-ESRGAN_GUI/models/realesrgan_x2plus.onnx',
+    url: 'https://github.com/net2cn/Real-ESRGAN_GUI/raw/0c4fd78d29cb4d6afde9f852195a71e58b50f53c/Real-ESRGAN_GUI/models/realesrgan_x2plus.onnx',
     sha256: '012b544d2ecf1433480165b3981223b3168926343c93a6cd688b11379f16551c',
   },
 ]
