@@ -12,6 +12,12 @@ const models = [
     sha256: '34cd7e60aeff28744c657de7a3dc64e872d506741de66987f3426f2b79f88017',
   },
   {
+    name: 'EfficientDet-Lite0',
+    target: resolve('public/models/efficientdet_lite0.tflite'),
+    url: 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float32/1/efficientdet_lite0.tflite',
+    sha256: '40338edf5ec70d43e318b0a716a84d4564cd1802759a7a07170c7e43796dbf58',
+  },
+  {
     name: 'Selfie Segmenter',
     target: resolve('public/models/selfie_segmenter.tflite'),
     url: 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/1/selfie_segmenter.tflite',
