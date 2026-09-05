@@ -5,6 +5,7 @@ import { detectFaces, type FocusRegion } from './ai'
 import { aiEnhanceFaces } from './ai-face-enhance'
 import { aiRestoreImage } from './ai-restore'
 import { aiUpscale2x } from './ai-upscale'
+import { hasGlobalAdjustments, runGlobalAdjustmentsWebGpu } from './gpu-adjustments'
 import { adaptiveLowLightAccelerated } from './low-light'
 import { PASSPORT_PRESETS, SOCIAL_PRESETS, type ImagePreset } from './presets'
 import { autoEnhancement, DEFAULT_ENHANCEMENT, enhanceRgba, type EnhancementSettings } from './enhance'
@@ -309,6 +310,24 @@ async function buildEnhancedImage(settings: EnhancementSettings): Promise<Enhanc
     const lowLight = await adaptiveLowLightAccelerated(sourceRgba)
     enhancementSource = lowLight.rgba
     effectiveSettings = { ...settings, lowLight: false }
+  }
+
+  if (hasGlobalAdjustments(effectiveSettings)) {
+    try {
+      self.postMessage({ type: 'status', message: 'Applying GPU adjustments…' })
+      enhancementSource = await runGlobalAdjustmentsWebGpu(enhancementSource, effectiveSettings)
+      effectiveSettings = {
+        ...effectiveSettings,
+        brightness: 0,
+        contrast: 0,
+        highlights: 0,
+        shadows: 0,
+        saturation: 0,
+        temperature: 0,
+      }
+    } catch (error) {
+      console.warn('WebGPU global adjustments unavailable; using CPU fallback.', error)
+    }
   }
 
   const useAiRestore = effectiveSettings.denoise >= 20 || effectiveSettings.deblur || effectiveSettings.restorePhoto
