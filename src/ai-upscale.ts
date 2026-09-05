@@ -4,12 +4,17 @@ const SCALE = 2
 const TILE = 128
 const OVERLAP = 8
 let sessionPromise: Promise<ort.InferenceSession> | undefined
+const cachedUpscales = new WeakMap<Uint8ClampedArray, AiUpscaleResult>()
 
 export type AiUpscaleResult = {
   rgba: Uint8ClampedArray
   width: number
   height: number
   backend: 'realesrgan'
+}
+
+export function cacheAiUpscale(source: Uint8ClampedArray, result: AiUpscaleResult) {
+  cachedUpscales.set(source, result)
 }
 
 function clampByte(value: number) {
@@ -128,6 +133,13 @@ export async function aiUpscale2x(
   height: number,
   onProgress?: (done: number, total: number) => void,
 ): Promise<AiUpscaleResult> {
+  const cached = cachedUpscales.get(source)
+  if (cached && cached.width === width * SCALE && cached.height === height * SCALE) {
+    cachedUpscales.delete(source)
+    onProgress?.(1, 1)
+    return cached
+  }
+
   const session = await getSession()
   const destinationWidth = width * SCALE
   const destinationHeight = height * SCALE
