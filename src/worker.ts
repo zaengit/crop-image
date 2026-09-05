@@ -76,7 +76,7 @@ function ensureSegmenter() {
   segmenterReady ??= (async () => {
     self.postMessage({ type: 'status', message: 'Loading local background remover…' })
     const { FilesetResolver, ImageSegmenter } = await import('@mediapipe/tasks-vision')
-    const wasmPath = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm'
+    const wasmPath = new URL(`${import.meta.env.BASE_URL}mediapipe-wasm`, self.location.origin).href.replace(/\/$/, '')
     const resolveVision = FilesetResolver.forVisionTasks as unknown as (path: string, useModuleLoader?: boolean) => Promise<{ wasmLoaderPath: string; [key: string]: unknown }>
     const fileset = await resolveVision(wasmPath, true)
     const modelUrl = new URL(`${import.meta.env.BASE_URL}models/selfie_segmenter.tflite`, self.location.origin).href
