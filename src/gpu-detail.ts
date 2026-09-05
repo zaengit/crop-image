@@ -103,7 +103,7 @@ export async function runDetailWebGpu(
   const a = device.createBuffer({ size: byteLength, usage: usageStorage })
   const b = device.createBuffer({ size: byteLength, usage: usageStorage })
   const readback = device.createBuffer({ size: byteLength, usage: usage.COPY_DST | usage.MAP_READ })
-  const params = device.createBuffer({ size: 16, usage: usage.UNIFORM | usage.COPY_DST })
+  const paramBuffers: GpuBuffer[] = []
   let mappedReadback: GpuBuffer | undefined
 
   try {
@@ -113,6 +113,8 @@ export async function runDetailWebGpu(
     let output = b
 
     const runPass = (pipeline: GpuPipeline, amount: number) => {
+      const params = device.createBuffer({ size: 16, usage: usage.UNIFORM | usage.COPY_DST })
+      paramBuffers.push(params)
       const bytes = new ArrayBuffer(16)
       const view = new DataView(bytes)
       view.setUint32(0, width, true)
@@ -151,6 +153,9 @@ export async function runDetailWebGpu(
     return result
   } finally {
     if (mappedReadback) mappedReadback.unmap()
-    a.destroy(); b.destroy(); params.destroy(); readback.destroy()
+    a.destroy()
+    b.destroy()
+    for (const buffer of paramBuffers) buffer.destroy()
+    readback.destroy()
   }
 }
