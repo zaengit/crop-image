@@ -63,6 +63,7 @@ let activeWorker: Worker | undefined
 let originalUrl: string | undefined
 let dragging = false
 let focusTimer: number | undefined
+let pendingFocus: { x: number; y: number } | undefined
 let currentFileName = 'crop-image'
 let activeMenu: PresetGroup = 'social'
 let customSequence = 0
@@ -83,7 +84,6 @@ function setGenerateBusy(busy: boolean) {
 }
 
 function markOutputsStale(message: string) {
-  setGenerateBusy(false)
   if (generated.length) downloadAll.disabled = true
   status.textContent = message
 }
@@ -303,14 +303,30 @@ function repositionTarget() {
   setTarget(Number(focusTarget.dataset.x ?? 0.5), Number(focusTarget.dataset.y ?? 0.5))
 }
 
+function flushPendingFocus() {
+  if (focusTimer) {
+    window.clearTimeout(focusTimer)
+    focusTimer = undefined
+  }
+  if (!pendingFocus) return
+  const focus = pendingFocus
+  pendingFocus = undefined
+  activeWorker?.postMessage({ type: 'focus', x: focus.x, y: focus.y })
+}
+
 function scheduleFocus(x: number, y: number) {
   const nx = Math.min(1, Math.max(0, x))
   const ny = Math.min(1, Math.max(0, y))
   setTarget(nx, ny)
+  pendingFocus = { x: nx, y: ny }
   if (focusTimer) window.clearTimeout(focusTimer)
   focusTimer = window.setTimeout(() => {
-    activeWorker?.postMessage({ type: 'focus', x: nx, y: ny })
-    markOutputsStale('Manual focus updated — click Generate crop to refresh outputs.')
+    focusTimer = undefined
+    const focus = pendingFocus
+    pendingFocus = undefined
+    if (!focus) return
+    activeWorker?.postMessage({ type: 'focus', x: focus.x, y: focus.y })
+    if (!generationBusy) markOutputsStale('Manual focus updated — click Generate crop to refresh outputs.')
   }, 180)
 }
 
@@ -452,7 +468,6 @@ function requestBackground(value: string) {
     return
   }
   selectBackground(value)
-  setGenerateBusy(false)
   backgroundStatus.textContent = value === 'original'
     ? 'Restoring the original background…'
     : 'Removing the original background locally…'
@@ -491,6 +506,9 @@ async function process(file: File) {
   }
 
   const revision = ++processRevision
+  if (focusTimer) window.clearTimeout(focusTimer)
+  focusTimer = undefined
+  pendingFocus = undefined
   activeWorker?.terminate()
   activeWorker = undefined
   workerReady = false
@@ -539,10 +557,10 @@ async function process(file: File) {
         setGenerateBusy(false)
         downloadAll.disabled = generated.length === 0
       }
-      if (message.type === 'settings-ready') {
+      if (message.type === 'settings-ready' && !generationBusy) {
         markOutputsStale('Output settings updated — click Generate crop to refresh outputs.')
       }
-      if (message.type === 'focus-ready') {
+      if (message.type === 'focus-ready' && !generationBusy) {
         markOutputsStale(message.manual
           ? 'Manual focus updated — click Generate crop to refresh outputs.'
           : 'Auto focus restored — click Generate crop to refresh outputs.')
@@ -551,9 +569,9 @@ async function process(file: File) {
         backgroundStatus.textContent = message.value === 'original'
           ? 'Original background ready.'
           : 'Background ready. The person mask is cached for faster color changes.'
-        markOutputsStale('Background ready — click Generate crop to refresh passport photos.')
+        if (!generationBusy) markOutputsStale('Background ready — click Generate crop to refresh passport photos.')
       }
-      if (message.type === 'enhancement-settings' && workerReady) {
+      if (message.type === 'enhancement-settings' && workerReady && !generationBusy) {
         markOutputsStale('Enhancement ready — click Generate crop to refresh outputs.')
       }
       if (message.type === 'result') {
@@ -631,6 +649,7 @@ generateSocial.addEventListener('click', () => {
     status.textContent = 'Choose an image first.'
     return
   }
+  flushPendingFocus()
   setMenu('social')
   status.textContent = 'Generating social media crops…'
   downloadAll.disabled = true
@@ -643,6 +662,7 @@ generatePassport.addEventListener('click', () => {
     status.textContent = 'Choose an image first.'
     return
   }
+  flushPendingFocus()
   setMenu('passport')
   status.textContent = 'Generating passport photo crops…'
   downloadAll.disabled = true
@@ -681,6 +701,7 @@ customForm.addEventListener('submit', (event) => {
     height: dimensions.height!,
     facePadding: 0.12,
   }
+  flushPendingFocus()
   status.textContent = `Generating ${preset.width} × ${preset.height}…`
   downloadAll.disabled = true
   setGenerateBusy(true)
@@ -717,6 +738,8 @@ focusStage.addEventListener('pointerup', (event) => {
 focusStage.addEventListener('pointercancel', () => { dragging = false })
 resetFocus.addEventListener('click', () => {
   if (focusTimer) window.clearTimeout(focusTimer)
+  focusTimer = undefined
+  pendingFocus = undefined
   activeWorker?.postMessage({ type: 'auto' })
   markOutputsStale('Auto focus restored — click Generate crop to refresh outputs.')
 })
