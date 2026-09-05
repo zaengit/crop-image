@@ -48,12 +48,9 @@ let cachedPersonMask: Float32Array | undefined
 let passportRgba: Uint8ClampedArray | undefined
 let passportBackground = 'original'
 let enhancementSettings: EnhancementSettings = { ...DEFAULT_ENHANCEMENT }
-let generating = false
-let pendingMode: Mode | undefined
 let currentMode: Mode = { kind: 'auto' }
 let outputFormat: OutputFormat = 'jpeg'
 let outputQuality = 0.9
-const activePresets = new Map<string, ImagePreset>()
 
 function ensureWasm() { wasmReady ??= initWasm(); return wasmReady }
 
@@ -248,29 +245,6 @@ async function generatePresets(presets: ImagePreset[], manualFocus = currentManu
   }
 }
 
-async function regenerateActive(mode: Mode) {
-  currentMode = mode
-  if (!activePresets.size) {
-    pendingMode = undefined
-    if (mode.kind === 'auto') postAutoFocusPoint()
-    return
-  }
-
-  pendingMode = mode
-  if (generating) return
-  generating = true
-  try {
-    while (pendingMode) {
-      const next = pendingMode
-      pendingMode = undefined
-      if (next.kind === 'auto') postAutoFocusPoint()
-      const manual = next.kind === 'focus' ? { x: next.x, y: next.y } : undefined
-      await generatePresets([...activePresets.values()], manual, true)
-      self.postMessage({ type: 'done', manual: next.kind === 'focus', format: outputFormat, quality: outputQuality })
-    }
-  } finally { generating = false }
-}
-
 async function rebuildEnhancedImage(settings: EnhancementSettings) {
   if (!sourceRgba) throw new Error('Enhancement requires a loaded image')
 
@@ -388,19 +362,26 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
     if (event.data.type === 'settings') {
       outputFormat = event.data.format
       outputQuality = Math.min(1, Math.max(0.1, event.data.quality))
-      await regenerateActive(currentMode)
+      self.postMessage({ type: 'settings-ready', format: outputFormat, quality: outputQuality })
       return
     }
-    if (event.data.type === 'focus') { await regenerateActive({ kind: 'focus', x: event.data.x, y: event.data.y }); return }
-    if (event.data.type === 'auto') { await regenerateActive({ kind: 'auto' }); return }
+    if (event.data.type === 'focus') {
+      currentMode = { kind: 'focus', x: event.data.x, y: event.data.y }
+      self.postMessage({ type: 'focus-ready', manual: true, x: event.data.x, y: event.data.y })
+      return
+    }
+    if (event.data.type === 'auto') {
+      currentMode = { kind: 'auto' }
+      postAutoFocusPoint()
+      self.postMessage({ type: 'focus-ready', manual: false })
+      return
+    }
     if (event.data.type === 'social') {
-      for (const preset of SOCIAL_PRESETS) activePresets.set(preset.id, preset)
       await generatePresets(SOCIAL_PRESETS, currentManualFocus(), true)
       self.postMessage({ type: 'done', manual: currentMode.kind === 'focus', format: outputFormat, quality: outputQuality })
       return
     }
     if (event.data.type === 'passport') {
-      for (const preset of PASSPORT_PRESETS) activePresets.set(preset.id, preset)
       await generatePresets(PASSPORT_PRESETS, currentManualFocus(), true)
       self.postMessage({ type: 'done', manual: currentMode.kind === 'focus', format: outputFormat, quality: outputQuality })
       return
@@ -408,20 +389,14 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
     if (event.data.type === 'background') {
       await composePassportBackground(event.data.value)
       self.postMessage({ type: 'background-ready', value: passportBackground })
-      const activePassport = [...activePresets.values()].filter((preset) => preset.group === 'passport')
-      if (activePassport.length) {
-        await generatePresets(activePassport, currentManualFocus(), true)
-        self.postMessage({ type: 'done', manual: currentMode.kind === 'focus', format: outputFormat, quality: outputQuality })
-      }
       return
     }
     if (event.data.type === 'custom') {
-      activePresets.set(event.data.preset.id, event.data.preset)
       await generatePresets([event.data.preset], currentManualFocus())
       self.postMessage({ type: 'done', manual: currentMode.kind === 'focus', format: outputFormat, quality: outputQuality })
       return
     }
-    if (event.data.type === 'remove-custom') { activePresets.delete(event.data.id); return }
+    if (event.data.type === 'remove-custom') return
 
     outputFormat = event.data.format ?? outputFormat
     outputQuality = Math.min(1, Math.max(0.1, event.data.quality ?? outputQuality))
@@ -436,9 +411,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
     cachedPersonMask = undefined
     passportRgba = undefined
     passportBackground = 'original'
-    pendingMode = undefined
     currentMode = { kind: 'auto' }
-    activePresets.clear()
     self.postMessage({ type: 'status', message: 'Finding the subject…' })
     try { cachedFocus = await detectFaces(cachedRgba, cachedWidth, cachedHeight) }
     catch (error) { console.warn('Face detector unavailable; using smart-crop fallback.', error) }
