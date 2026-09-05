@@ -1,2 +1,75 @@
 /* Tailwind is compiled by the official Vite plugin. */
 @import "tailwindcss";
+
+:root {
+  color-scheme: light;
+  background: #f4f4f2;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+html {
+  min-width: 320px;
+  background: #f4f4f2;
+}
+
+body {
+  min-width: 320px;
+  margin: 0;
+  background: #f4f4f2;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button:not(:disabled),
+label[role="button"] {
+  cursor: pointer;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid #0a0a0a;
+  outline-offset: 2px;
+}
+
+input[type="range"] {
+  accent-color: #0a0a0a;
+}
+
+input[type="color"] {
+  width: 1.35rem;
+  height: 1.35rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  vertical-align: middle;
+  cursor: pointer;
+}
+
+.focus-stage {
+  background-color: #e7e7e3;
+  background-image: linear-gradient(45deg, #dcdcd7 25%, transparent 25%), linear-gradient(-45deg, #dcdcd7 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #dcdcd7 75%), linear-gradient(-45deg, transparent 75%, #dcdcd7 75%);
+  background-position: 0 0, 0 12px, 12px -12px, -12px 0;
+  background-size: 24px 24px;
+}
+
+::selection {
+  background: #0a0a0a;
+  color: #fff;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

@@ -7,8 +7,8 @@ type ResultCardProps = {
 
 function ResultCard({ item, onDelete }: ResultCardProps) {
   return (
-    <article className="card overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-200/80">
-      <div className="flex items-center justify-center bg-slate-50 p-3">
+    <article className="card overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg hover:shadow-neutral-200/70">
+      <div className="flex items-center justify-center bg-neutral-100 p-3">
         <img
           src={item.url}
           alt={`${item.preset.platform} ${item.preset.label}`}
@@ -30,7 +30,7 @@ function ResultCard({ item, onDelete }: ResultCardProps) {
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium hover:border-cyan-500"
+            className="min-h-9 rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-medium text-neutral-700 transition hover:border-neutral-950 hover:text-neutral-950"
             onClick={() => downloadBlob(item.blob, `${item.preset.id}.${item.extension}`)}
           >
             Download
@@ -38,7 +38,7 @@ function ResultCard({ item, onDelete }: ResultCardProps) {
           {item.preset.group === 'custom' ? (
             <button
               type="button"
-              className="rounded-lg border border-rose-200 px-3 py-1.5 text-xs text-rose-700"
+              className="min-h-9 rounded-lg border border-neutral-300 px-3 py-1.5 text-xs text-neutral-600 transition hover:border-neutral-950 hover:text-neutral-950"
               onClick={() => onDelete(item.preset.id)}
             >
               Delete

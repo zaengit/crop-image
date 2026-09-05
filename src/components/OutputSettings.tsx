@@ -17,18 +17,18 @@ export function OutputSettings({ engine }: OutputSettingsProps) {
   }
 
   return (
-    <div className="flex flex-wrap items-end gap-3" aria-label="Output settings">
-      <label className="grid gap-1 text-xs text-slate-600">
+    <div className="flex flex-wrap items-end gap-2" aria-label="Output settings">
+      <label className="grid min-w-28 gap-1 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-600">
         <span>Format</span>
-        <select id="format" value={engine.format} onChange={handleFormat} className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-900">
+        <select id="format" value={engine.format} onChange={handleFormat} className="rounded-lg border border-neutral-300 bg-white px-2 py-1.5 text-sm text-neutral-900 transition focus:border-neutral-950">
           <option value="jpeg">JPEG</option>
           <option value="webp">WebP</option>
           <option value="png">PNG</option>
         </select>
       </label>
       {engine.format !== 'png' ? (
-        <label id="quality-wrap" className="grid min-w-44 gap-1 text-xs text-slate-600">
-          <span>Quality <strong id="quality-value" className="text-slate-800">{engine.quality}</strong></span>
+        <label id="quality-wrap" className="grid min-w-44 gap-1 rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs text-neutral-600">
+          <span>Quality <strong id="quality-value" className="text-neutral-950">{engine.quality}</strong></span>
           <input
             id="quality"
             type="range"
@@ -36,7 +36,7 @@ export function OutputSettings({ engine }: OutputSettingsProps) {
             max="100"
             value={engine.quality}
             step="1"
-            className="accent-cyan-400"
+            className="accent-neutral-950"
             onInput={handleQuality}
             onChange={engine.commitQuality}
           />
@@ -44,7 +44,7 @@ export function OutputSettings({ engine }: OutputSettingsProps) {
       ) : null}
       <button
         id="download-all"
-        className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-cyan-400 hover:text-cyan-700 disabled:opacity-40"
+        className="secondary-button min-h-11 rounded-xl border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-700 transition hover:border-neutral-950 hover:text-neutral-950 disabled:cursor-not-allowed disabled:opacity-40"
         type="button"
         disabled={!engine.generated.length || engine.busy}
         onClick={() => void engine.downloadZip()}

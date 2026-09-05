@@ -65,14 +65,14 @@ export function FocusEditor({ sourceUrl, focus, previewFilter, onFocusChange, on
   }
 
   return (
-    <section id="focus-editor" className="grid gap-5 rounded-3xl border border-slate-200 bg-white p-5 lg:grid-cols-[minmax(220px,0.35fr)_1fr]">
+    <section id="focus-editor" className="grid gap-5 rounded-[28px] border border-neutral-200 bg-white p-5 shadow-[0_20px_55px_rgba(15,23,42,0.06)] sm:p-6 lg:grid-cols-[minmax(250px,0.36fr)_1fr]">
       <div>
-        <p className="text-xs font-bold tracking-[0.2em] text-cyan-700">FOCAL POINT</p>
-        <h2 className="mt-2 text-2xl font-semibold text-slate-950">Fine-tune the smart crop</h2>
-        <p className="mt-2 text-sm text-slate-600">Drag the target over the subject you want every generated size to prioritize.</p>
+        <p className="text-xs font-bold uppercase tracking-[0.2em] text-neutral-500">01 / Focal point</p>
+        <h2 className="mt-2 text-2xl font-semibold tracking-tight text-neutral-950">Fine-tune the smart crop</h2>
+        <p className="mt-2 text-sm leading-6 text-neutral-600">Drag anywhere on the image to place the subject where every generated size should prioritize it.</p>
         <button
           id="reset-focus"
-          className="mt-4 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm text-slate-700 transition hover:border-cyan-400 hover:text-cyan-700"
+          className="secondary-button mt-5 min-h-11 rounded-xl border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-700 transition hover:border-neutral-950 hover:text-neutral-950"
           type="button"
           onClick={onReset}
         >
@@ -82,7 +82,7 @@ export function FocusEditor({ sourceUrl, focus, previewFilter, onFocusChange, on
       <div
         ref={stageRef}
         id="focus-stage"
-        className="relative flex min-h-[320px] touch-none items-center justify-center overflow-hidden rounded-2xl bg-slate-50"
+        className="focus-stage relative flex min-h-[320px] touch-none items-center justify-center overflow-hidden rounded-2xl border border-neutral-200 bg-neutral-100 sm:min-h-[380px]"
         onPointerDown={(event) => {
           setDragging(true)
           event.currentTarget.setPointerCapture?.(event.pointerId)
@@ -96,6 +96,10 @@ export function FocusEditor({ sourceUrl, focus, previewFilter, onFocusChange, on
         }}
         onPointerCancel={() => setDragging(false)}
       >
+        <div className="pointer-events-none absolute left-3 top-3 z-10 flex items-center gap-2 rounded-full border border-neutral-200 bg-white/90 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-600 shadow-sm backdrop-blur sm:left-4 sm:top-4">
+          <span className="h-1.5 w-1.5 rounded-full bg-neutral-950" aria-hidden="true" />
+          Drag to focus
+        </div>
         <img
           ref={imageRef}
           id="focus-image"
@@ -108,10 +112,10 @@ export function FocusEditor({ sourceUrl, focus, previewFilter, onFocusChange, on
         />
         <button
           id="focus-target"
-          className="absolute h-8 w-8 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-cyan-600/40 shadow-[0_0_0_5px_rgba(6,182,212,.25)]"
+          className="absolute h-9 w-9 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-neutral-950/55 shadow-[0_0_0_5px_rgba(10,10,10,0.2)]"
           style={targetStyle}
           type="button"
-          aria-label="Focal point"
+          aria-label="Focal point. Drag to reposition."
         />
       </div>
     </section>
