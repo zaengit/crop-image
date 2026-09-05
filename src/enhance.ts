@@ -143,7 +143,7 @@ export function enhanceRgba(
   width: number,
   height: number,
   settings: EnhancementSettings,
-  faces: Array<{ x: number; y: number; width: number; height: number }> = [],
+  faces: Array<{ x: number; y: number; width: number; height: number; kind?: 'face' | 'subject' }> = [],
   options: { skipDetail?: boolean } = {},
 ) {
   const base = settings.lowLight ? adaptiveLowLight(original).rgba : new Uint8ClampedArray(original)
@@ -197,9 +197,10 @@ export function enhanceRgba(
     processed = applySharpen(processed, width, height, detail.sharpen)
   }
 
-  if (settings.faceEnhance && faces.length) {
+  const detectedFaces = faces.filter((face) => face.kind !== 'subject')
+  if (settings.faceEnhance && detectedFaces.length) {
     const faceBase = new Uint8ClampedArray(processed)
-    for (const face of faces) {
+    for (const face of detectedFaces) {
       const x0 = Math.max(0, Math.floor((face.x - face.width * 0.18) * width))
       const y0 = Math.max(0, Math.floor((face.y - face.height * 0.18) * height))
       const x1 = Math.min(width, Math.ceil((face.x + face.width * 1.18) * width))
