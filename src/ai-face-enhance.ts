@@ -13,6 +13,8 @@ export type FaceEnhanceResult = {
   faces: number
 }
 
+const MAX_FACE_RESTORE_EDGE = 768
+
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value))
 }
@@ -32,6 +34,29 @@ function extractRegion(
     out.set(source.subarray(srcStart, srcStart + width * 4), dstStart)
   }
   return out
+}
+
+function resizeRgba(
+  source: Uint8ClampedArray,
+  width: number,
+  height: number,
+  targetWidth: number,
+  targetHeight: number,
+) {
+  if (width === targetWidth && height === targetHeight) return new Uint8ClampedArray(source)
+
+  const sourceCanvas = new OffscreenCanvas(width, height)
+  const sourceCtx = sourceCanvas.getContext('2d')
+  if (!sourceCtx) throw new Error('Unable to create face enhancement source canvas')
+  sourceCtx.putImageData(new ImageData(new Uint8ClampedArray(source), width, height), 0, 0)
+
+  const targetCanvas = new OffscreenCanvas(targetWidth, targetHeight)
+  const targetCtx = targetCanvas.getContext('2d', { willReadFrequently: true })
+  if (!targetCtx) throw new Error('Unable to create face enhancement resize canvas')
+  targetCtx.imageSmoothingEnabled = true
+  targetCtx.imageSmoothingQuality = 'high'
+  targetCtx.drawImage(sourceCanvas, 0, 0, width, height, 0, 0, targetWidth, targetHeight)
+  return targetCtx.getImageData(0, 0, targetWidth, targetHeight).data
 }
 
 function blendFace(
@@ -70,10 +95,12 @@ export async function aiEnhanceFaces(
   if (!faces.length) return { rgba: new Uint8ClampedArray(source), faces: 0 }
 
   const output = new Uint8ClampedArray(source)
+  const imagePixels = width * height
+  const maxFaces = imagePixels > 8_000_000 ? 4 : 6
   const selected = [...faces]
     .filter((face) => face.width > 0.025 && face.height > 0.025)
     .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
-    .slice(0, 8)
+    .slice(0, maxFaces)
 
   let processed = 0
   for (const face of selected) {
@@ -96,8 +123,19 @@ export async function aiEnhanceFaces(
     if (cropWidth < 32 || cropHeight < 32) continue
 
     const crop = extractRegion(output, width, x0, y0, cropWidth, cropHeight)
-    const restored = await aiRestoreImage(crop, cropWidth, cropHeight, 0.62)
-    blendFace(output, width, restored.rgba, x0, y0, cropWidth, cropHeight, 0.72)
+    const restoreScale = Math.min(1, MAX_FACE_RESTORE_EDGE / Math.max(cropWidth, cropHeight))
+    const restoreWidth = Math.max(32, Math.round(cropWidth * restoreScale))
+    const restoreHeight = Math.max(32, Math.round(cropHeight * restoreScale))
+    const restoreInput = restoreScale < 1
+      ? resizeRgba(crop, cropWidth, cropHeight, restoreWidth, restoreHeight)
+      : crop
+
+    const restored = await aiRestoreImage(restoreInput, restoreWidth, restoreHeight, 0.62)
+    const restoredForBlend = restoreScale < 1
+      ? resizeRgba(restored.rgba, restoreWidth, restoreHeight, cropWidth, cropHeight)
+      : restored.rgba
+
+    blendFace(output, width, restoredForBlend, x0, y0, cropWidth, cropHeight, 0.72)
     processed++
     onProgress?.(processed, selected.length)
   }
