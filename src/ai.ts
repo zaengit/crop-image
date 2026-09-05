@@ -4,18 +4,24 @@ export type FocusRegion = {
   width: number
   height: number
   confidence: number
-  kind: 'face'
+  kind: 'face' | 'subject'
+  label?: string
 }
 
 const MODEL_WIDTH = 320
 const MODEL_HEIGHT = 240
 const SCORE_THRESHOLD = 0.6
 const FALLBACK_SCORE_THRESHOLD = 0.48
+const OBJECT_SCORE_THRESHOLD = 0.3
 const IOU_THRESHOLD = 0.3
 
 type OrtModule = typeof import('onnxruntime-web/wasm')
+type VisionModule = typeof import('@mediapipe/tasks-vision')
+type ObjectDetectorInstance = Awaited<ReturnType<VisionModule['ObjectDetector']['createFromOptions']>>
+
 let ortPromise: Promise<OrtModule> | undefined
 let sessionPromise: Promise<Awaited<ReturnType<OrtModule['InferenceSession']['create']>>> | undefined
+let objectDetectorPromise: Promise<ObjectDetectorInstance> | undefined
 
 function getOrt() {
   ortPromise ??= import('onnxruntime-web/wasm')
@@ -38,6 +44,29 @@ async function getSession() {
     })
   }
   return sessionPromise
+}
+
+async function getObjectDetector() {
+  objectDetectorPromise ??= (async () => {
+    const { FilesetResolver, ObjectDetector } = await import('@mediapipe/tasks-vision')
+    const wasmPath = new URL(`${import.meta.env.BASE_URL}mediapipe-wasm`, globalThis.location.origin).href.replace(/\/$/, '')
+    const resolveVision = FilesetResolver.forVisionTasks as unknown as (path: string, useModuleLoader?: boolean) => Promise<{ wasmLoaderPath: string; [key: string]: unknown }>
+    const fileset = await resolveVision(wasmPath, true)
+    const modelUrl = new URL(`${import.meta.env.BASE_URL}models/efficientdet_lite0.tflite`, globalThis.location.origin).href
+    const response = await fetch(modelUrl)
+    if (!response.ok) throw new Error(`Unable to load object detection model (${response.status})`)
+    const modelAssetBuffer = new Uint8Array(await response.arrayBuffer())
+    return ObjectDetector.createFromOptions(fileset as never, {
+      baseOptions: { modelAssetBuffer, delegate: 'CPU' },
+      runningMode: 'IMAGE',
+      scoreThreshold: OBJECT_SCORE_THRESHOLD,
+      maxResults: 8,
+    } as never)
+  })().catch((error) => {
+    objectDetectorPromise = undefined
+    throw error
+  })
+  return objectDetectorPromise
 }
 
 function iou(a: FocusRegion, b: FocusRegion) {
@@ -67,17 +96,20 @@ function validFaceBox(x1: number, y1: number, x2: number, y2: number) {
   return width > 0 && height > 0 && area >= 0.001 && area <= 0.75 && aspect >= 0.45 && aspect <= 2.2
 }
 
-export async function detectFaces(rgba: Uint8ClampedArray, width: number, height: number): Promise<FocusRegion[]> {
+function sourceCanvas(rgba: Uint8ClampedArray, width: number, height: number) {
+  const canvas = new OffscreenCanvas(width, height)
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return undefined
+  ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), width, height), 0, 0)
+  return canvas
+}
+
+async function detectFaceRegions(rgba: Uint8ClampedArray, width: number, height: number): Promise<FocusRegion[]> {
   const canvas = new OffscreenCanvas(MODEL_WIDTH, MODEL_HEIGHT)
   const ctx = canvas.getContext('2d', { willReadFrequently: true })
   if (!ctx) return []
-  const source = new OffscreenCanvas(width, height)
-  const sourceCtx = source.getContext('2d')
-  if (!sourceCtx) return []
-
-  const sourcePixels = new Uint8ClampedArray(rgba.length)
-  sourcePixels.set(rgba)
-  sourceCtx.putImageData(new ImageData(sourcePixels, width, height), 0, 0)
+  const source = sourceCanvas(rgba, width, height)
+  if (!source) return []
   ctx.drawImage(source, 0, 0, MODEL_WIDTH, MODEL_HEIGHT)
 
   const pixels = ctx.getImageData(0, 0, MODEL_WIDTH, MODEL_HEIGHT).data
@@ -128,4 +160,62 @@ export async function detectFaces(rgba: Uint8ClampedArray, width: number, height
   const detected = nms(regions)
   if (detected.length) return detected
   return fallback ? [fallback] : []
+}
+
+async function detectObjectSubject(rgba: Uint8ClampedArray, width: number, height: number): Promise<FocusRegion | undefined> {
+  const canvas = sourceCanvas(rgba, width, height)
+  if (!canvas) return undefined
+  const detector = await getObjectDetector()
+  const result = detector.detect(canvas as never)
+  let best: { region: FocusRegion; rank: number } | undefined
+
+  for (const detection of result.detections ?? []) {
+    const box = detection.boundingBox
+    const category = detection.categories?.[0]
+    if (!box || !category) continue
+    const confidence = category.score ?? 0
+    if (confidence < OBJECT_SCORE_THRESHOLD) continue
+
+    const x = Math.max(0, Math.min(1, box.originX / width))
+    const y = Math.max(0, Math.min(1, box.originY / height))
+    const boxWidth = Math.max(0, Math.min(1 - x, box.width / width))
+    const boxHeight = Math.max(0, Math.min(1 - y, box.height / height))
+    const area = boxWidth * boxHeight
+    if (area < 0.002 || area > 0.95) continue
+
+    const centerX = x + boxWidth / 2
+    const centerY = y + boxHeight / 2
+    const centerDistance = Math.hypot(centerX - 0.5, centerY - 0.5)
+    const centerBias = Math.max(0.78, 1 - centerDistance * 0.22)
+    const rank = confidence * (0.4 + Math.sqrt(area)) * centerBias
+    const region: FocusRegion = {
+      x,
+      y,
+      width: boxWidth,
+      height: boxHeight,
+      confidence,
+      kind: 'subject',
+      label: category.categoryName || category.displayName || undefined,
+    }
+    if (!best || rank > best.rank) best = { region, rank }
+  }
+
+  return best?.region
+}
+
+export async function detectFaces(rgba: Uint8ClampedArray, width: number, height: number): Promise<FocusRegion[]> {
+  try {
+    const faces = await detectFaceRegions(rgba, width, height)
+    if (faces.length) return faces
+  } catch (error) {
+    console.warn('Face detection failed; trying AI object focus fallback.', error)
+  }
+
+  try {
+    const subject = await detectObjectSubject(rgba, width, height)
+    return subject ? [subject] : []
+  } catch (error) {
+    console.warn('AI object focus fallback failed.', error)
+    return []
+  }
 }
