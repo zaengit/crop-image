@@ -4,7 +4,7 @@ type FocusPoint = { x: number; y: number }
 type ImageBox = { left: number; top: number; width: number; height: number }
 
 type FocusEditorProps = {
-  sourceUrl: string
+  sourceUrl: string | undefined
   focus: FocusPoint
   previewFilter: string
   onFocusChange: (x: number, y: number) => void
@@ -99,7 +99,7 @@ export function FocusEditor({ sourceUrl, focus, previewFilter, onFocusChange, on
         <img
           ref={imageRef}
           id="focus-image"
-          src={sourceUrl}
+          src={sourceUrl ?? ''}
           alt="Original upload for focal-point adjustment"
           className="max-h-[560px] max-w-full select-none object-contain"
           draggable={false}
