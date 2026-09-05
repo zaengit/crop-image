@@ -11,6 +11,7 @@ export type EnhancementSettings = {
   faceEnhance: boolean
   deblur: boolean
   restorePhoto: boolean
+  upscale2x: boolean
 }
 
 export const DEFAULT_ENHANCEMENT: EnhancementSettings = {
@@ -26,6 +27,7 @@ export const DEFAULT_ENHANCEMENT: EnhancementSettings = {
   faceEnhance: false,
   deblur: false,
   restorePhoto: false,
+  upscale2x: false,
 }
 
 function clamp(value: number) {
