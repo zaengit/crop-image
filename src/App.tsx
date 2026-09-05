@@ -18,7 +18,7 @@ function ResultCard({ item, onDelete }: { item: Generated; onDelete: (id: string
         />
       </div>
       <div className="card-body space-y-3 p-4">
-        <div className="card-meta"><strong className="block text-sm text-white">{item.preset.platform}</strong><span className="text-sm text-slate-600">{item.preset.label}</span></div>
+        <div className="card-meta"><strong className="block text-sm text-slate-950">{item.preset.platform}</strong><span className="text-sm text-slate-600">{item.preset.label}</span></div>
         <small className="block text-slate-500">{item.preset.width} × {item.preset.height} · {item.extension.toUpperCase()} · {humanBytes(item.blob.size)}</small>
         <div className="card-actions flex flex-wrap gap-2">
           <button type="button" className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium hover:border-cyan-500" onClick={() => downloadBlob(item.blob, `${item.preset.id}.${item.extension}`)}>Download</button>
@@ -34,7 +34,7 @@ function OutputSettings({ engine }: { engine: any }) {
     <div className="output-controls flex flex-wrap items-end gap-3" aria-label="Output settings">
       <label className="grid gap-1 text-xs text-slate-600"><span>Format</span><select id="format" value={engine.format} onChange={(event: any) => engine.setFormat(event.currentTarget.value)} className="rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-900"><option value="jpeg">JPEG</option><option value="webp">WebP</option><option value="png">PNG</option></select></label>
       {engine.format !== 'png' ? <label id="quality-wrap" className="grid min-w-44 gap-1 text-xs text-slate-600"><span>Quality <strong id="quality-value" className="text-slate-800">{engine.quality}</strong></span><input id="quality" type="range" min="60" max="100" value={engine.quality} step="1" className="accent-cyan-400" onInput={(event: any) => engine.setQuality(Number(event.currentTarget.value))} onChange={engine.commitQuality} /></label> : null}
-      <button id="download-all" className="secondary rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium disabled:opacity-40" type="button" disabled={!engine.generated.length || engine.busy} onClick={() => void engine.downloadZip()}>Download ZIP</button>
+      <button id="download-all" className="secondary bg-white text-slate-700 transition hover:border-cyan-400 hover:text-cyan-700 rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium disabled:opacity-40" type="button" disabled={!engine.generated.length || engine.busy} onClick={() => void engine.downloadZip()}>Download ZIP</button>
     </div>
   )
 }
@@ -161,7 +161,7 @@ export function App() {
               <p className="eyebrow text-xs font-bold tracking-[0.2em] text-cyan-700">FOCAL POINT</p>
               <h2 className="mt-2 text-2xl font-semibold text-slate-950">Fine-tune the smart crop</h2>
               <p className="mt-2 text-sm text-slate-600">Drag the target over the subject you want every generated size to prioritize.</p>
-              <button id="reset-focus" className="secondary mt-4 rounded-xl border border-slate-300 px-4 py-2 text-sm" type="button" onClick={engine.resetFocus}>Use auto focus</button>
+              <button id="reset-focus" className="secondary bg-white text-slate-700 transition hover:border-cyan-400 hover:text-cyan-700 mt-4 rounded-xl border border-slate-300 px-4 py-2 text-sm" type="button" onClick={engine.resetFocus}>Use auto focus</button>
             </div>
             <div
               ref={stageRef}

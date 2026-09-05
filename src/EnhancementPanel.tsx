@@ -73,14 +73,14 @@ export function EnhancementPanel(props: Props) {
       <div className="enhance-head flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <p className="eyebrow text-xs font-bold tracking-[0.2em] text-cyan-700">GLOBAL ENHANCE</p>
-          <h2 className="mt-2 text-2xl font-semibold text-white">Improve image quality</h2>
+          <h2 className="mt-2 text-2xl font-semibold text-slate-950">Improve image quality</h2>
           <p className="mt-1 max-w-2xl text-sm text-slate-600">Enhancement is optional. Adjust the current image before generating crops if needed.</p>
         </div>
         <div className="enhance-actions flex flex-wrap gap-2">
           <button id="enhance-auto" className="primary rounded-xl bg-cyan-600 px-4 py-2 font-semibold text-white" type="button" onClick={props.onAuto}>Auto Enhance</button>
           <button
             id="enhance-compare"
-            className="secondary rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium"
+            className="secondary bg-white text-slate-700 transition hover:border-cyan-400 hover:text-cyan-700 rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium"
             type="button"
             onPointerDown={() => props.onCompareChange(true)}
             onPointerUp={() => props.onCompareChange(false)}
@@ -89,7 +89,7 @@ export function EnhancementPanel(props: Props) {
             onKeyDown={(event: any) => { if (event.key === ' ' || event.key === 'Enter') props.onCompareChange(true) }}
             onKeyUp={() => props.onCompareChange(false)}
           >Hold to compare</button>
-          <button id="enhance-reset" className="secondary rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium" type="button" onClick={() => { setDraft({ ...DEFAULT_ENHANCEMENT }); props.onReset() }}>Reset</button>
+          <button id="enhance-reset" className="secondary bg-white text-slate-700 transition hover:border-cyan-400 hover:text-cyan-700 rounded-xl border border-slate-300 px-4 py-2 text-sm font-medium" type="button" onClick={() => { setDraft({ ...DEFAULT_ENHANCEMENT }); props.onReset() }}>Reset</button>
         </div>
       </div>
 
