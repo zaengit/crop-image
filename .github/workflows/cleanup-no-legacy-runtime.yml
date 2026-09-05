@@ -1,0 +1,58 @@
+name: Cleanup No Legacy Runtime
+on:
+  push:
+    branches: [cleanup/no-legacy-runtime]
+permissions:
+  contents: write
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove transitional React globals and legacy JS test
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          files = {
+            'src/App.tsx': "import { useEffect, useRef, useState } from 'react'\n",
+            'src/EnhancementPanel.tsx': "import { useEffect, useRef, useState } from 'react'\n",
+            'src/StoreAssetsPanel.tsx': "import { useEffect, useRef, useState } from 'react'\n",
+            'src/use-crop-engine.ts': "import { useEffect, useRef, useState } from 'react'\n",
+          }
+          for file, imp in files.items():
+            p = Path(file)
+            s = p.read_text()
+            if imp.strip() not in s:
+              s = imp + s
+            s = s.replace('React.useState', 'useState')
+            s = s.replace('React.useRef', 'useRef')
+            s = s.replace('React.useEffect', 'useEffect')
+            p.write_text(s)
+
+          Path('src/main.tsx').write_text("""import { StrictMode } from 'react'\nimport { createRoot } from 'react-dom/client'\nimport './tailwind.css'\nimport { App } from './App'\n\nconst root = document.getElementById('root')\nif (!root) throw new Error('Missing #root mount element.')\n\ncreateRoot(root).render(\n  <StrictMode>\n    <App />\n  </StrictMode>,\n)\n""")
+          Path('src/react-main.tsx').unlink()
+
+          index = Path('index.html')
+          s = index.read_text().replace('/src/react-main.tsx', '/src/main.tsx')
+          index.write_text(s)
+
+          test = Path('tests/smoke.spec.js')
+          if test.exists():
+            Path('tests/smoke.spec.ts').write_text(test.read_text())
+            test.unlink()
+          PY
+
+          if grep -R "globalThis.*React\|React\.useState\|React\.useRef\|React\.useEffect\|react-main" src index.html tests --exclude-dir=wasm; then
+            echo 'Legacy React compatibility remains.' >&2
+            exit 1
+          fi
+      - name: Commit cleanup
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'refactor: remove legacy React runtime compatibility' || exit 0
+          git push
