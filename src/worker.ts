@@ -12,6 +12,7 @@ type MediaPipeModule = typeof import('@mediapipe/tasks-vision')
 type Segmenter = Awaited<ReturnType<MediaPipeModule['ImageSegmenter']['createFromOptions']>>
 type OutputFormat = 'png' | 'jpeg' | 'webp'
 type Mode = { kind: 'focus'; x: number; y: number } | { kind: 'auto' }
+type ErrorScope = 'load' | 'crop' | 'enhancement' | 'background' | 'settings' | 'focus'
 
 type UpscaleInfo = {
   scale: number
@@ -30,6 +31,15 @@ type FaceEnhanceInfo = {
   method: 'ai' | 'local'
   faces: number
   fallback?: string
+}
+
+type EnhancedImage = {
+  rgba: Uint8ClampedArray
+  width: number
+  height: number
+  upscale?: UpscaleInfo
+  restoration?: RestorationInfo
+  faceEnhance?: FaceEnhanceInfo
 }
 
 const MAX_UPSCALE_PIXELS = 24_000_000
@@ -53,17 +63,22 @@ let currentMode: Mode = { kind: 'auto' }
 let outputFormat: OutputFormat = 'jpeg'
 let outputQuality = 0.9
 let generationRevision = 0
+let enhancementRevision = 0
+let backgroundRevision = 0
 
 function ensureWasm() { wasmReady ??= initWasm(); return wasmReady }
+
+function progressPercent(done: number, total: number) {
+  return total > 0 ? Math.max(0, Math.min(100, Math.round(done / total * 100))) : 0
+}
 
 function ensureSegmenter() {
   segmenterReady ??= (async () => {
     self.postMessage({ type: 'status', message: 'Loading local background remover…' })
     const { FilesetResolver, ImageSegmenter } = await import('@mediapipe/tasks-vision')
-    const wasmPath = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm'
+    const wasmPath = new URL(`${import.meta.env.BASE_URL}mediapipe-wasm`, self.location.origin).href.replace(/\/$/, '')
     const resolveVision = FilesetResolver.forVisionTasks as unknown as (path: string, useModuleLoader?: boolean) => Promise<{ wasmLoaderPath: string; [key: string]: unknown }>
     const fileset = await resolveVision(wasmPath, true)
-    fileset.wasmLoaderPath = `${fileset.wasmLoaderPath}${fileset.wasmLoaderPath.includes('?') ? '&' : '?'}cb=${Date.now()}`
     const modelUrl = new URL(`${import.meta.env.BASE_URL}models/selfie_segmenter.tflite`, self.location.origin).href
     const modelResponse = await fetch(modelUrl)
     if (!modelResponse.ok) throw new Error(`Unable to load background model (${modelResponse.status})`)
@@ -153,7 +168,7 @@ async function upscaleRgba(source: Uint8ClampedArray, width: number, height: num
     try {
       self.postMessage({ type: 'status', message: 'Loading AI super-resolution model…' })
       const ai = await aiUpscale2x(source, width, height, (done, total) => {
-        self.postMessage({ type: 'status', message: `AI upscaling ${done} / ${total} tiles…` })
+        self.postMessage({ type: 'status', message: `AI upscaling… ${progressPercent(done, total)}%` })
       })
       return { rgba: ai.rgba, width: ai.width, height: ai.height, scale: 2, method: 'ai' as const }
     } catch (error) {
@@ -191,15 +206,21 @@ async function ensurePersonMask() {
     if (!mask) throw new Error('Person segmentation did not return a confidence mask')
     cachedPersonMask = new Float32Array(mask.getAsFloat32Array())
     return cachedPersonMask
-  } finally { result.close() }
+  } finally {
+    result.close()
+  }
 }
 
-async function composePassportBackground(background: string) {
+async function composePassportBackground(background: string, revision = ++backgroundRevision) {
   passportBackground = background
-  if (background === 'original') { passportRgba = undefined; return }
+  if (background === 'original') {
+    passportRgba = undefined
+    return revision === backgroundRevision
+  }
   if (!cachedRgba) throw new Error('No image loaded')
   const color = parseHexColor(background)
   const mask = await ensurePersonMask()
+  if (revision !== backgroundRevision || background !== passportBackground) return false
   if (mask.length !== cachedWidth * cachedHeight) throw new Error('Unexpected segmentation mask size')
   const output = new Uint8ClampedArray(cachedRgba.length)
   for (let i = 0; i < mask.length; i++) {
@@ -211,7 +232,9 @@ async function composePassportBackground(background: string) {
     output[p + 2] = Math.round(cachedRgba[p + 2] * alpha + color.b * inv)
     output[p + 3] = 255
   }
+  if (revision !== backgroundRevision || background !== passportBackground) return false
   passportRgba = output
+  return true
 }
 
 async function encodeOutput(pngBytes: Uint8Array, width: number, height: number) {
@@ -226,24 +249,48 @@ async function encodeOutput(pngBytes: Uint8Array, width: number, height: number)
     const bytes = await blob.arrayBuffer()
     const mime = blob.type || mimeFor(outputFormat)
     return { bytes, mime, extension: extensionFromMime(mime) }
-  } finally { bitmap.close() }
+  } finally {
+    bitmap.close()
+  }
 }
 
-function currentManualFocus() { return currentMode.kind === 'focus' ? { x: currentMode.x, y: currentMode.y } : undefined }
+function currentManualFocus() {
+  return currentMode.kind === 'focus' ? { x: currentMode.x, y: currentMode.y } : undefined
+}
 
-async function generatePresets(presets: ImagePreset[], manualFocus = currentManualFocus(), replace = false) {
+async function generatePresets(presets: ImagePreset[], revision: number, manualFocus = currentManualFocus(), replace = false) {
   if (!cachedRgba) throw new Error('No image loaded')
   if (!presets.length) return false
-  const revision = generationRevision
   const manualX = manualFocus ? manualFocus.x : -1
   const manualY = manualFocus ? manualFocus.y : -1
-  self.postMessage({ type: 'status', message: manualFocus ? 'Applying manual focus…' : cachedFocus.length ? `Found ${cachedFocus.length} face${cachedFocus.length > 1 ? 's' : ''}. Cropping…` : 'Using smart crop…' })
+  self.postMessage({
+    type: 'status',
+    message: manualFocus
+      ? 'Applying manual focus…'
+      : cachedFocus.length
+        ? `Found ${cachedFocus.length} face${cachedFocus.length > 1 ? 's' : ''}. Cropping…`
+        : 'Using smart crop…',
+  })
 
   for (let i = 0; i < presets.length; i++) {
+    if (revision !== generationRevision) return false
     const preset = presets[i]
     const sourcePixels = preset.group === 'passport' && passportRgba ? passportRgba : cachedRgba
     const wasmPixels = new Uint8Array(sourcePixels.buffer as ArrayBuffer, sourcePixels.byteOffset, sourcePixels.byteLength)
-    const png = smart_crop_png(wasmPixels, cachedWidth, cachedHeight, preset.width, preset.height, JSON.stringify(cachedFocus), preset.safeTop ?? 0, preset.safeBottom ?? 0, preset.facePadding ?? 0.1, manualX, manualY)
+    const png = smart_crop_png(
+      wasmPixels,
+      cachedWidth,
+      cachedHeight,
+      preset.width,
+      preset.height,
+      JSON.stringify(cachedFocus),
+      preset.safeTop ?? 0,
+      preset.safeBottom ?? 0,
+      preset.facePadding ?? 0.1,
+      manualX,
+      manualY,
+    )
+    if (revision !== generationRevision) return false
     const encoded = await encodeOutput(png, preset.width, preset.height)
     if (revision !== generationRevision) return false
     self.postMessage({ type: 'result', preset, bytes: encoded.bytes, mime: encoded.mime, extension: encoded.extension, index: i, total: presets.length, replace }, [encoded.bytes])
@@ -251,14 +298,11 @@ async function generatePresets(presets: ImagePreset[], manualFocus = currentManu
   return revision === generationRevision
 }
 
-async function rebuildEnhancedImage(settings: EnhancementSettings) {
+async function buildEnhancedImage(settings: EnhancementSettings): Promise<EnhancedImage> {
   if (!sourceRgba) throw new Error('Enhancement requires a loaded image')
 
   const useAiRestore = settings.denoise >= 20 || settings.deblur || settings.restorePhoto
-  const localSettings = useAiRestore
-    ? { ...settings, denoise: 0, deblur: false }
-    : settings
-
+  const localSettings = useAiRestore ? { ...settings, denoise: 0, deblur: false } : settings
   let pixels = enhanceRgba(sourceRgba, sourceWidth, sourceHeight, localSettings, cachedFocus)
   let width = sourceWidth
   let height = sourceHeight
@@ -268,13 +312,10 @@ async function rebuildEnhancedImage(settings: EnhancementSettings) {
 
   if (useAiRestore) {
     try {
-      const strength = Math.min(
-        0.9,
-        0.42 + Math.min(0.25, settings.denoise / 250) + (settings.deblur ? 0.14 : 0) + (settings.restorePhoto ? 0.08 : 0),
-      )
+      const strength = Math.min(0.9, 0.42 + Math.min(0.25, settings.denoise / 250) + (settings.deblur ? 0.14 : 0) + (settings.restorePhoto ? 0.08 : 0))
       self.postMessage({ type: 'status', message: 'Loading AI restoration model…' })
       const restored = await aiRestoreImage(pixels, width, height, strength, (done, total) => {
-        self.postMessage({ type: 'status', message: `AI restoring ${done} / ${total} tiles…` })
+        self.postMessage({ type: 'status', message: `AI restoring… ${progressPercent(done, total)}%` })
       })
       pixels = restored.rgba
       restoration = { method: 'ai' }
@@ -282,10 +323,7 @@ async function rebuildEnhancedImage(settings: EnhancementSettings) {
       console.warn('AI restoration unavailable; using local denoise/deblur fallback.', error)
       self.postMessage({ type: 'status', message: 'AI restoration unavailable. Using local fallback…' })
       pixels = enhanceRgba(sourceRgba, sourceWidth, sourceHeight, settings, cachedFocus)
-      restoration = {
-        method: 'local',
-        fallback: error instanceof Error ? error.message : String(error),
-      }
+      restoration = { method: 'local', fallback: error instanceof Error ? error.message : String(error) }
     }
   }
 
@@ -294,19 +332,15 @@ async function rebuildEnhancedImage(settings: EnhancementSettings) {
       faceEnhance = { method: 'local', faces: 0, fallback: 'No face detected' }
     } else {
       try {
-        self.postMessage({ type: 'status', message: `AI enhancing ${cachedFocus.length} detected face${cachedFocus.length > 1 ? 's' : ''}…` })
+        self.postMessage({ type: 'status', message: `Enhancing ${cachedFocus.length} detected face${cachedFocus.length > 1 ? 's' : ''}…` })
         const enhanced = await aiEnhanceFaces(pixels, width, height, cachedFocus, (done, total) => {
-          self.postMessage({ type: 'status', message: `AI face enhancement ${done} / ${total}…` })
+          self.postMessage({ type: 'status', message: `AI face enhancement… ${progressPercent(done, total)}%` })
         })
         pixels = enhanced.rgba
         faceEnhance = { method: 'ai', faces: enhanced.faces }
       } catch (error) {
         console.warn('AI face enhancement unavailable; keeping local face enhancement.', error)
-        faceEnhance = {
-          method: 'local',
-          faces: cachedFocus.length,
-          fallback: error instanceof Error ? error.message : String(error),
-        }
+        faceEnhance = { method: 'local', faces: cachedFocus.length, fallback: error instanceof Error ? error.message : String(error) }
       }
     }
   }
@@ -325,21 +359,41 @@ async function rebuildEnhancedImage(settings: EnhancementSettings) {
     }
   }
 
-  cachedRgba = pixels
-  cachedWidth = width
-  cachedHeight = height
-  cachedPersonMask = undefined
-  passportRgba = undefined
-  if (passportBackground !== 'original') await composePassportBackground(passportBackground)
-  return { upscale, restoration, faceEnhance }
+  return { rgba: pixels, width, height, upscale, restoration, faceEnhance }
 }
 
 async function applyEnhancement(settings: EnhancementSettings, auto = false) {
   if (!sourceRgba) throw new Error('Enhancement requires a loaded image')
-  enhancementSettings = { ...DEFAULT_ENHANCEMENT, ...settings }
+  const revision = ++enhancementRevision
+  generationRevision += 1
+  const requested = { ...DEFAULT_ENHANCEMENT, ...settings }
   self.postMessage({ type: 'status', message: auto ? 'Applying Auto Enhance…' : 'Applying global enhancement…' })
-  const { upscale, restoration, faceEnhance } = await rebuildEnhancedImage(enhancementSettings)
-  self.postMessage({ type: 'enhancement-settings', settings: enhancementSettings, auto, upscale, restoration, faceEnhance })
+  const built = await buildEnhancedImage(requested)
+  if (revision !== enhancementRevision) return false
+
+  enhancementSettings = requested
+  cachedRgba = built.rgba
+  cachedWidth = built.width
+  cachedHeight = built.height
+  cachedPersonMask = undefined
+  passportRgba = undefined
+  backgroundRevision += 1
+
+  const selectedBackground = passportBackground
+  if (selectedBackground !== 'original') {
+    const backgroundReady = await composePassportBackground(selectedBackground)
+    if (!backgroundReady || revision !== enhancementRevision) return false
+  }
+  if (revision !== enhancementRevision) return false
+  self.postMessage({
+    type: 'enhancement-settings',
+    settings: enhancementSettings,
+    auto,
+    upscale: built.upscale,
+    restoration: built.restoration,
+    faceEnhance: built.faceEnhance,
+  })
+  return true
 }
 
 type WorkerMessage =
@@ -356,67 +410,87 @@ type WorkerMessage =
   | { type: 'enhancement-auto' }
 
 self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
+  let scope: ErrorScope = 'load'
   try {
     await ensureWasm()
+    const message = event.data
 
-    if (event.data.type === 'enhancement') { generationRevision += 1; await applyEnhancement(event.data.settings); return }
-    if (event.data.type === 'enhancement-auto') {
+    if (message.type === 'enhancement') {
+      scope = 'enhancement'
+      await applyEnhancement(message.settings)
+      return
+    }
+    if (message.type === 'enhancement-auto') {
+      scope = 'enhancement'
       if (!sourceRgba) throw new Error('Enhancement requires a loaded image')
-      generationRevision += 1
       await applyEnhancement(autoEnhancement(sourceRgba), true)
       return
     }
-    if (event.data.type === 'settings') {
+    if (message.type === 'settings') {
+      scope = 'settings'
       generationRevision += 1
-      outputFormat = event.data.format
-      outputQuality = Math.min(1, Math.max(0.1, event.data.quality))
+      outputFormat = message.format
+      outputQuality = Math.min(1, Math.max(0.1, message.quality))
       self.postMessage({ type: 'settings-ready', format: outputFormat, quality: outputQuality })
       return
     }
-    if (event.data.type === 'focus') {
+    if (message.type === 'focus') {
+      scope = 'focus'
       generationRevision += 1
-      currentMode = { kind: 'focus', x: event.data.x, y: event.data.y }
-      self.postMessage({ type: 'focus-ready', manual: true, x: event.data.x, y: event.data.y })
+      currentMode = { kind: 'focus', x: message.x, y: message.y }
+      self.postMessage({ type: 'focus-ready', manual: true, x: message.x, y: message.y })
       return
     }
-    if (event.data.type === 'auto') {
+    if (message.type === 'auto') {
+      scope = 'focus'
       generationRevision += 1
       currentMode = { kind: 'auto' }
       postAutoFocusPoint()
       self.postMessage({ type: 'focus-ready', manual: false })
       return
     }
-    if (event.data.type === 'social') {
-      const completed = await generatePresets(SOCIAL_PRESETS, currentManualFocus(), true)
+    if (message.type === 'social') {
+      scope = 'crop'
+      const revision = ++generationRevision
+      const completed = await generatePresets(SOCIAL_PRESETS, revision, currentManualFocus(), true)
       if (completed) self.postMessage({ type: 'done', manual: currentMode.kind === 'focus', format: outputFormat, quality: outputQuality })
       return
     }
-    if (event.data.type === 'passport') {
-      const completed = await generatePresets(PASSPORT_PRESETS, currentManualFocus(), true)
+    if (message.type === 'passport') {
+      scope = 'crop'
+      const revision = ++generationRevision
+      const completed = await generatePresets(PASSPORT_PRESETS, revision, currentManualFocus(), true)
       if (completed) self.postMessage({ type: 'done', manual: currentMode.kind === 'focus', format: outputFormat, quality: outputQuality })
       return
     }
-    if (event.data.type === 'background') {
+    if (message.type === 'background') {
+      scope = 'background'
       generationRevision += 1
-      await composePassportBackground(event.data.value)
-      self.postMessage({ type: 'background-ready', value: passportBackground })
+      backgroundRevision += 1
+      const revision = backgroundRevision
+      const completed = await composePassportBackground(message.value, revision)
+      if (completed) self.postMessage({ type: 'background-ready', value: passportBackground })
       return
     }
-    if (event.data.type === 'custom') {
-      const completed = await generatePresets([event.data.preset], currentManualFocus())
+    if (message.type === 'custom') {
+      scope = 'crop'
+      const revision = ++generationRevision
+      const completed = await generatePresets([message.preset], revision, currentManualFocus())
       if (completed) self.postMessage({ type: 'done', manual: currentMode.kind === 'focus', format: outputFormat, quality: outputQuality })
       return
     }
-    if (event.data.type === 'remove-custom') return
+    if (message.type === 'remove-custom') return
 
     generationRevision += 1
-    outputFormat = event.data.format ?? outputFormat
-    outputQuality = Math.min(1, Math.max(0.1, event.data.quality ?? outputQuality))
-    sourceWidth = event.data.width
-    sourceHeight = event.data.height
+    enhancementRevision += 1
+    backgroundRevision += 1
+    outputFormat = message.format ?? outputFormat
+    outputQuality = Math.min(1, Math.max(0.1, message.quality ?? outputQuality))
+    sourceWidth = message.width
+    sourceHeight = message.height
     cachedWidth = sourceWidth
     cachedHeight = sourceHeight
-    sourceRgba = new Uint8ClampedArray(event.data.rgba)
+    sourceRgba = new Uint8ClampedArray(message.rgba)
     cachedRgba = new Uint8ClampedArray(sourceRgba)
     enhancementSettings = { ...DEFAULT_ENHANCEMENT }
     cachedFocus = []
@@ -425,12 +499,15 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
     passportBackground = 'original'
     currentMode = { kind: 'auto' }
     self.postMessage({ type: 'status', message: 'Finding the subject…' })
-    try { cachedFocus = await detectFaces(cachedRgba, cachedWidth, cachedHeight) }
-    catch (error) { console.warn('Face detector unavailable; using smart-crop fallback.', error) }
+    try {
+      cachedFocus = await detectFaces(cachedRgba, cachedWidth, cachedHeight)
+    } catch (error) {
+      console.warn('Face detector unavailable; using smart-crop fallback.', error)
+    }
     postAutoFocusPoint()
     self.postMessage({ type: 'enhancement-settings', settings: enhancementSettings, auto: false })
     self.postMessage({ type: 'ready' })
   } catch (error) {
-    self.postMessage({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+    self.postMessage({ type: 'error', scope, message: error instanceof Error ? error.message : String(error) })
   }
 }

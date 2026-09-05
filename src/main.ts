@@ -1,6 +1,6 @@
 import './style.css'
 import './enhancement-bridge'
-import { zipSync, strToU8 } from 'fflate'
+import { Zip, ZipDeflate, strToU8 } from 'fflate'
 import { initStoreAssets } from './store-assets'
 import { createCropWorker } from './worker-channel'
 import type { ImagePreset, PresetGroup } from './presets'
@@ -30,6 +30,7 @@ const storePanel = document.querySelector<HTMLElement>('#store-panel')!
 const generateSocial = document.querySelector<HTMLButtonElement>('#generate-social')!
 const generatePassport = document.querySelector<HTMLButtonElement>('#generate-passport')!
 const customForm = document.querySelector<HTMLFormElement>('#custom-form')!
+const customGenerate = customForm.querySelector<HTMLButtonElement>('button[type="submit"]')!
 const customWidth = document.querySelector<HTMLInputElement>('#custom-width')!
 const customHeight = document.querySelector<HTMLInputElement>('#custom-height')!
 const lockRatio = document.querySelector<HTMLInputElement>('#lock-ratio')!
@@ -55,20 +56,32 @@ type DecodedImage = {
   sourceHeight: number
   scaled: boolean
 }
+type WorkerErrorScope = 'load' | 'crop' | 'enhancement' | 'background' | 'settings' | 'focus'
 
 let generated: Generated[] = []
 let activeWorker: Worker | undefined
 let originalUrl: string | undefined
 let dragging = false
 let focusTimer: number | undefined
+let pendingFocus: { x: number; y: number } | undefined
 let currentFileName = 'crop-image'
 let activeMenu: PresetGroup = 'social'
 let customSequence = 0
 let lockedRatio = 1
 let activeBackground = 'original'
+let processRevision = 0
+let generationBusy = false
+let workerReady = false
 
 function currentFormat() { return formatSelect.value as OutputFormat }
 function currentQuality() { return Number(qualityInput.value) / 100 }
+
+function setGenerateBusy(busy: boolean) {
+  generationBusy = busy
+  generateSocial.disabled = busy
+  generatePassport.disabled = busy
+  customGenerate.disabled = busy
+}
 
 function markOutputsStale(message: string) {
   if (generated.length) downloadAll.disabled = true
@@ -210,6 +223,7 @@ function createCard(item: Generated) {
   image.alt = `${item.preset.platform} ${item.preset.label}`
   image.width = item.preset.width
   image.height = item.preset.height
+  image.loading = 'lazy'
   image.style.aspectRatio = `${item.preset.width} / ${item.preset.height}`
   thumb.append(image)
 
@@ -289,14 +303,30 @@ function repositionTarget() {
   setTarget(Number(focusTarget.dataset.x ?? 0.5), Number(focusTarget.dataset.y ?? 0.5))
 }
 
+function flushPendingFocus() {
+  if (focusTimer) {
+    window.clearTimeout(focusTimer)
+    focusTimer = undefined
+  }
+  if (!pendingFocus) return
+  const focus = pendingFocus
+  pendingFocus = undefined
+  activeWorker?.postMessage({ type: 'focus', x: focus.x, y: focus.y })
+}
+
 function scheduleFocus(x: number, y: number) {
   const nx = Math.min(1, Math.max(0, x))
   const ny = Math.min(1, Math.max(0, y))
   setTarget(nx, ny)
+  pendingFocus = { x: nx, y: ny }
   if (focusTimer) window.clearTimeout(focusTimer)
   focusTimer = window.setTimeout(() => {
-    activeWorker?.postMessage({ type: 'focus', x: nx, y: ny })
-    markOutputsStale('Manual focus updated — click Generate crop to refresh outputs.')
+    focusTimer = undefined
+    const focus = pendingFocus
+    pendingFocus = undefined
+    if (!focus) return
+    activeWorker?.postMessage({ type: 'focus', x: focus.x, y: focus.y })
+    if (!generationBusy) markOutputsStale('Manual focus updated — click Generate crop to refresh outputs.')
   }, 180)
 }
 
@@ -327,32 +357,73 @@ function folderFor(group: PresetGroup) {
   return 'social-media'
 }
 
+async function createStreamingZip(entries: Array<{ path: string; blob?: Blob; bytes?: Uint8Array }>) {
+  return new Promise<Blob>((resolve, reject) => {
+    const chunks: Uint8Array[] = []
+    let settled = false
+    const zip = new Zip((error, data, final) => {
+      if (settled) return
+      if (error) {
+        settled = true
+        reject(error)
+        return
+      }
+      chunks.push(data)
+      if (final) {
+        settled = true
+        resolve(new Blob(chunks.map((chunk) => chunk.slice().buffer), { type: 'application/zip' }))
+      }
+    })
+
+    ;(async () => {
+      try {
+        for (const entry of entries) {
+          const file = new ZipDeflate(entry.path, { level: 6 })
+          zip.add(file)
+          const bytes = entry.bytes ?? new Uint8Array(await entry.blob!.arrayBuffer())
+          file.push(bytes, true)
+          await Promise.resolve()
+        }
+        zip.end()
+      } catch (error) {
+        if (!settled) {
+          settled = true
+          reject(error)
+        }
+      }
+    })()
+  })
+}
+
 async function downloadZip() {
   if (!generated.length || downloadAll.disabled) return
   downloadAll.disabled = true
   status.textContent = 'Creating ZIP locally…'
   try {
-    const files: Record<string, Uint8Array> = {}
-    for (const item of generated) {
-      files[`${folderFor(item.preset.group)}/${item.preset.id}.${item.extension}`] = new Uint8Array(await item.blob.arrayBuffer())
-    }
-    files['manifest.json'] = strToU8(JSON.stringify({
-      generatedAt: new Date().toISOString(),
-      source: currentFileName,
-      format: currentFormat(),
-      quality: currentFormat() === 'png' ? null : Number(qualityInput.value),
-      passportBackground: activeBackground,
-      files: generated.map((item) => ({
-        id: item.preset.id,
-        group: item.preset.group,
-        label: item.preset.label,
-        width: item.preset.width,
-        height: item.preset.height,
-        filename: `${folderFor(item.preset.group)}/${item.preset.id}.${item.extension}`,
-      })),
-    }, null, 2))
-    const zipped = zipSync(files, { level: 6 })
-    download(new Blob([zipped.slice().buffer], { type: 'application/zip' }), 'image-sizes.zip')
+    const entries: Array<{ path: string; blob?: Blob; bytes?: Uint8Array }> = generated.map((item) => ({
+      path: `${folderFor(item.preset.group)}/${item.preset.id}.${item.extension}`,
+      blob: item.blob,
+    }))
+    entries.push({
+      path: 'manifest.json',
+      bytes: strToU8(JSON.stringify({
+        generatedAt: new Date().toISOString(),
+        source: currentFileName,
+        format: currentFormat(),
+        quality: currentFormat() === 'png' ? null : Number(qualityInput.value),
+        passportBackground: activeBackground,
+        files: generated.map((item) => ({
+          id: item.preset.id,
+          group: item.preset.group,
+          label: item.preset.label,
+          width: item.preset.width,
+          height: item.preset.height,
+          filename: `${folderFor(item.preset.group)}/${item.preset.id}.${item.extension}`,
+        })),
+      }, null, 2)),
+    })
+    const zipped = await createStreamingZip(entries)
+    download(zipped, 'image-sizes.zip')
     status.textContent = `Done — ZIP contains ${generated.length} images.`
   } catch (error) {
     status.textContent = `Error creating ZIP: ${error instanceof Error ? error.message : String(error)}`
@@ -434,7 +505,14 @@ async function process(file: File) {
     return
   }
 
+  const revision = ++processRevision
+  if (focusTimer) window.clearTimeout(focusTimer)
+  focusTimer = undefined
+  pendingFocus = undefined
   activeWorker?.terminate()
+  activeWorker = undefined
+  workerReady = false
+  setGenerateBusy(false)
   revokeResults()
   customSequence = 0
   activeBackground = 'original'
@@ -454,6 +532,8 @@ async function process(file: File) {
 
   try {
     const image = await decode(file)
+    if (revision !== processRevision) return
+
     if (image.scaled) {
       const sourceMp = (image.sourceWidth * image.sourceHeight / 1_000_000).toFixed(1)
       const workingMp = (image.width * image.height / 1_000_000).toFixed(1)
@@ -462,22 +542,25 @@ async function process(file: File) {
       status.textContent = 'Finding the subject…'
     }
 
-    const worker = createCropWorker(new URL('./worker.ts', import.meta.url))
+    const worker = createCropWorker()
     activeWorker = worker
 
     worker.onmessage = (event) => {
+      if (activeWorker !== worker || revision !== processRevision) return
       const message = event.data
       if (message.type === 'status') status.textContent = message.message
       if (message.type === 'auto-focus-point') setTarget(message.x, message.y)
       if (message.type === 'ready') {
+        workerReady = true
         status.textContent = 'Ready — adjust the focal point if needed, then click Generate crop.'
         pick.disabled = false
+        setGenerateBusy(false)
         downloadAll.disabled = generated.length === 0
       }
-      if (message.type === 'settings-ready') {
+      if (message.type === 'settings-ready' && !generationBusy) {
         markOutputsStale('Output settings updated — click Generate crop to refresh outputs.')
       }
-      if (message.type === 'focus-ready') {
+      if (message.type === 'focus-ready' && !generationBusy) {
         markOutputsStale(message.manual
           ? 'Manual focus updated — click Generate crop to refresh outputs.'
           : 'Auto focus restored — click Generate crop to refresh outputs.')
@@ -486,7 +569,10 @@ async function process(file: File) {
         backgroundStatus.textContent = message.value === 'original'
           ? 'Original background ready.'
           : 'Background ready. The person mask is cached for faster color changes.'
-        markOutputsStale('Background ready — click Generate crop to refresh passport photos.')
+        if (!generationBusy) markOutputsStale('Background ready — click Generate crop to refresh passport photos.')
+      }
+      if (message.type === 'enhancement-settings' && workerReady && !generationBusy) {
+        markOutputsStale('Enhancement ready — click Generate crop to refresh outputs.')
       }
       if (message.type === 'result') {
         const blob = new Blob([message.bytes], { type: message.mime })
@@ -504,21 +590,28 @@ async function process(file: File) {
           ? 'Done — manual focus applied to generated sizes.'
           : `Done — ${generated.length} images generated locally.`
         pick.disabled = false
+        setGenerateBusy(false)
         downloadAll.disabled = generated.length === 0
       }
       if (message.type === 'error') {
+        const scope = message.scope as WorkerErrorScope | undefined
         status.textContent = `Error: ${message.message}`
-        backgroundStatus.textContent = `Background error: ${message.message}`
+        if (scope === 'background') backgroundStatus.textContent = `Background error: ${message.message}`
         pick.disabled = false
+        setGenerateBusy(false)
         downloadAll.disabled = generated.length === 0
       }
     }
+
     worker.onerror = (event) => {
+      if (activeWorker !== worker || revision !== processRevision) return
       const detail = event.message || 'Crop worker failed to start in this browser.'
       status.textContent = `Error: ${detail}`
       pick.disabled = false
+      setGenerateBusy(false)
       downloadAll.disabled = generated.length === 0
     }
+
     worker.postMessage({
       type: 'load',
       rgba: image.rgba.buffer,
@@ -528,46 +621,56 @@ async function process(file: File) {
       quality: currentQuality(),
     }, [image.rgba.buffer])
   } catch (error) {
+    if (revision !== processRevision) return
     status.textContent = `Error reading image: ${error instanceof Error ? error.message : String(error)}`
     pick.disabled = false
+    setGenerateBusy(false)
     downloadAll.disabled = generated.length === 0
   }
 }
 
 pick.addEventListener('click', () => fileInput.click())
-fileInput.addEventListener('change', () => fileInput.files?.[0] && process(fileInput.files[0]))
+fileInput.addEventListener('change', () => {
+  const file = fileInput.files?.[0]
+  fileInput.value = ''
+  if (file) void process(file)
+})
 dropzone.addEventListener('dragover', (event) => { event.preventDefault(); dropzone.classList.add('drag') })
 dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'))
 dropzone.addEventListener('drop', (event) => {
   event.preventDefault()
   dropzone.classList.remove('drag')
   const file = event.dataTransfer?.files[0]
-  if (file) process(file)
+  if (file) void process(file)
 })
 
 generateSocial.addEventListener('click', () => {
-  if (!activeWorker) {
+  if (!activeWorker || !workerReady) {
     status.textContent = 'Choose an image first.'
     return
   }
+  flushPendingFocus()
   setMenu('social')
   status.textContent = 'Generating social media crops…'
   downloadAll.disabled = true
+  setGenerateBusy(true)
   activeWorker.postMessage({ type: 'social' })
 })
 
 generatePassport.addEventListener('click', () => {
-  if (!activeWorker) {
+  if (!activeWorker || !workerReady) {
     status.textContent = 'Choose an image first.'
     return
   }
+  flushPendingFocus()
   setMenu('passport')
   status.textContent = 'Generating passport photo crops…'
   downloadAll.disabled = true
+  setGenerateBusy(true)
   activeWorker.postMessage({ type: 'passport' })
 })
 
-downloadAll.addEventListener('click', downloadZip)
+downloadAll.addEventListener('click', () => void downloadZip())
 formatSelect.addEventListener('change', updateOutputSettings)
 qualityInput.addEventListener('input', updateQualityUi)
 qualityInput.addEventListener('change', updateOutputSettings)
@@ -579,7 +682,7 @@ passportBackgroundColor.addEventListener('change', () => requestBackground(passp
 customForm.addEventListener('submit', (event) => {
   event.preventDefault()
   customError.textContent = ''
-  if (!activeWorker) {
+  if (!activeWorker || !workerReady) {
     customError.textContent = 'Choose an image first.'
     return
   }
@@ -598,8 +701,10 @@ customForm.addEventListener('submit', (event) => {
     height: dimensions.height!,
     facePadding: 0.12,
   }
+  flushPendingFocus()
   status.textContent = `Generating ${preset.width} × ${preset.height}…`
   downloadAll.disabled = true
+  setGenerateBusy(true)
   activeWorker.postMessage({ type: 'custom', preset })
 })
 
@@ -633,6 +738,8 @@ focusStage.addEventListener('pointerup', (event) => {
 focusStage.addEventListener('pointercancel', () => { dragging = false })
 resetFocus.addEventListener('click', () => {
   if (focusTimer) window.clearTimeout(focusTimer)
+  focusTimer = undefined
+  pendingFocus = undefined
   activeWorker?.postMessage({ type: 'auto' })
   markOutputsStale('Auto focus restored — click Generate crop to refresh outputs.')
 })
@@ -642,5 +749,7 @@ window.addEventListener('resize', repositionTarget)
 updateQualityUi()
 setMenu('social')
 selectBackground('original')
+setGenerateBusy(false)
 downloadAll.disabled = true
 initStoreAssets()
+document.documentElement.dataset.appReady = 'true'

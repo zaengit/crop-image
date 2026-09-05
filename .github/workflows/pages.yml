@@ -1,8 +1,9 @@
 name: Deploy Pages
 
 on:
-  push:
-    branches: [main]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -16,19 +17,24 @@ concurrency:
 
 jobs:
   build:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.98.1
           targets: wasm32-unknown-unknown
 
       - name: Install wasm-pack
@@ -37,9 +43,12 @@ jobs:
           version: v0.13.1
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
 
-      - name: Fetch UltraFace model
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Fetch and verify AI models
         run: npm run model:fetch
 
       - name: Build WASM
@@ -51,6 +60,11 @@ jobs:
       - name: Build site
         run: npm run build:web
 
+      - name: Verify production worker artifact
+        run: |
+          test -n "$(find dist/assets -maxdepth 1 -name 'worker-*.js' -print -quit)"
+          test -z "$(find dist -name 'worker-*.ts' -print -quit)"
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
@@ -60,6 +74,7 @@ jobs:
           path: dist
 
   deploy:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

@@ -1,11 +1,11 @@
-import { strToU8, zipSync } from 'fflate'
-import { createEnhancedStoreBitmap } from './store-global-enhance'
+import { Zip, ZipDeflate, strToU8 } from 'fflate'
 
 type StorePlatform = 'google' | 'apple' | 'both'
 type StoreOrientation = 'portrait' | 'landscape' | 'both'
 type ResizeMode = 'fit' | 'fill' | 'smart'
 type StoreFormat = 'png' | 'jpeg'
 type IconFitMode = 'fit' | 'fill'
+type ZipEntry = { path: string; blob?: Blob; bytes?: Uint8Array }
 
 type ScreenshotSource = {
   id: string
@@ -50,6 +50,15 @@ type IconOutput = {
   height: number
 }
 
+type DecodedStoreSource = {
+  canvas: HTMLCanvasElement
+  width: number
+  height: number
+  sourceWidth: number
+  sourceHeight: number
+  scaled: boolean
+}
+
 const GOOGLE_PRESETS: StorePreset[] = [
   { id: 'google-phone', platform: 'google', category: 'phone', label: 'Google Play · Phone', width: 1080, height: 1920 },
   { id: 'google-tablet-7', platform: 'google', category: 'tablet7', label: 'Google Play · 7-inch tablet', width: 1440, height: 2560 },
@@ -63,6 +72,8 @@ const APPLE_PRESETS: StorePreset[] = [
 ]
 
 const APPLE_ICON_SIZES = [1024, 180, 167, 152, 120, 87, 80, 76, 60, 58, 40, 29, 20]
+const MAX_STORE_WORKING_PIXELS = 12_000_000
+const MAX_STORE_WORKING_EDGE = 4096
 
 function byId<T extends HTMLElement>(id: string) {
   return document.querySelector<T>(`#${id}`)
@@ -87,6 +98,90 @@ function download(blob: Blob, filename: string) {
   link.download = filename
   link.click()
   window.setTimeout(() => URL.revokeObjectURL(link.href), 1200)
+}
+
+function workingDimensions(width: number, height: number) {
+  const pixels = width * height
+  const byPixels = pixels > MAX_STORE_WORKING_PIXELS ? Math.sqrt(MAX_STORE_WORKING_PIXELS / pixels) : 1
+  const byEdge = Math.max(width, height) > MAX_STORE_WORKING_EDGE ? MAX_STORE_WORKING_EDGE / Math.max(width, height) : 1
+  const scale = Math.min(1, byPixels, byEdge)
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+    scale,
+  }
+}
+
+function renderDecodedSource(source: CanvasImageSource, sourceWidth: number, sourceHeight: number): DecodedStoreSource {
+  if (!sourceWidth || !sourceHeight) throw new Error('Image has invalid dimensions.')
+  const target = workingDimensions(sourceWidth, sourceHeight)
+  const canvas = document.createElement('canvas')
+  canvas.width = target.width
+  canvas.height = target.height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('This browser could not create an App Store image canvas.')
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(source, 0, 0, target.width, target.height)
+  return {
+    canvas,
+    width: target.width,
+    height: target.height,
+    sourceWidth,
+    sourceHeight,
+    scaled: target.scale < 0.999,
+  }
+}
+
+function decodeWithImageElement(file: File): Promise<DecodedStoreSource> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file)
+    const image = new Image()
+    const cleanup = () => URL.revokeObjectURL(url)
+    image.onload = () => {
+      try {
+        resolve(renderDecodedSource(image, image.naturalWidth, image.naturalHeight))
+      } catch (error) {
+        reject(error)
+      } finally {
+        cleanup()
+      }
+    }
+    image.onerror = () => {
+      cleanup()
+      reject(new Error('This browser could not decode the selected image. Try JPEG, PNG, or WebP.'))
+    }
+    image.src = url
+  })
+}
+
+async function decodeStoreFile(file: File): Promise<DecodedStoreSource> {
+  let primaryError: unknown
+  if (typeof createImageBitmap === 'function') {
+    try {
+      const bitmap = await createImageBitmap(file)
+      try {
+        return renderDecodedSource(bitmap, bitmap.width, bitmap.height)
+      } finally {
+        bitmap.close()
+      }
+    } catch (error) {
+      primaryError = error
+      console.warn('App Store createImageBitmap failed; using image-element fallback.', error)
+    }
+  }
+
+  try {
+    return await decodeWithImageElement(file)
+  } catch (fallbackError) {
+    const primary = bitmapErrorText(primaryError)
+    const fallback = fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
+    throw new Error(primary ? `${fallback} Primary decoder: ${primary}` : fallback)
+  }
+}
+
+function bitmapErrorText(error: unknown) {
+  return error instanceof Error ? error.message : error ? String(error) : ''
 }
 
 function canvasBlob(canvas: HTMLCanvasElement, format: StoreFormat, quality = 0.92) {
@@ -132,20 +227,19 @@ function drawContain(
   const scale = Math.min(targetWidth / sourceWidth, targetHeight / sourceHeight)
   const width = sourceWidth * scale
   const height = sourceHeight * scale
-  const x = (targetWidth - width) / 2
-  const y = (targetHeight - height) / 2
-  ctx.drawImage(image, x, y, width, height)
+  ctx.drawImage(image, (targetWidth - width) / 2, (targetHeight - height) / 2, width, height)
   return scale
 }
 
-function estimateFocus(bitmap: ImageBitmap) {
+function estimateFocus(image: CanvasImageSource, width: number, height: number) {
   const sampleWidth = 48
-  const sampleHeight = Math.max(24, Math.round(sampleWidth * bitmap.height / bitmap.width))
+  const sampleHeight = Math.max(24, Math.round(sampleWidth * height / width))
   const canvas = document.createElement('canvas')
   canvas.width = sampleWidth
   canvas.height = sampleHeight
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })!
-  ctx.drawImage(bitmap, 0, 0, sampleWidth, sampleHeight)
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  if (!ctx) return { x: 0.5, y: 0.5 }
+  ctx.drawImage(image, 0, 0, sampleWidth, sampleHeight)
   const data = ctx.getImageData(0, 0, sampleWidth, sampleHeight).data
 
   let bestScore = -Infinity
@@ -185,7 +279,9 @@ function upscaleLabel(scale: number) {
 }
 
 async function renderScreenshot(
-  bitmap: ImageBitmap,
+  image: CanvasImageSource,
+  sourceWidth: number,
+  sourceHeight: number,
   targetWidth: number,
   targetHeight: number,
   mode: ResizeMode,
@@ -195,7 +291,8 @@ async function renderScreenshot(
   const canvas = document.createElement('canvas')
   canvas.width = targetWidth
   canvas.height = targetHeight
-  const ctx = canvas.getContext('2d')!
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Unable to create screenshot output canvas')
   ctx.imageSmoothingEnabled = true
   ctx.imageSmoothingQuality = 'high'
 
@@ -203,7 +300,7 @@ async function renderScreenshot(
     if (background === 'auto') {
       ctx.save()
       ctx.filter = 'blur(28px) saturate(0.9)'
-      drawCover(ctx, bitmap, bitmap.width, bitmap.height, targetWidth, targetHeight)
+      drawCover(ctx, image, sourceWidth, sourceHeight, targetWidth, targetHeight)
       ctx.restore()
       ctx.save()
       ctx.fillStyle = 'rgba(255,255,255,.14)'
@@ -212,18 +309,20 @@ async function renderScreenshot(
     } else {
       fillSolid(ctx, targetWidth, targetHeight, background)
     }
-    const scale = drawContain(ctx, bitmap, bitmap.width, bitmap.height, targetWidth, targetHeight)
+    const scale = drawContain(ctx, image, sourceWidth, sourceHeight, targetWidth, targetHeight)
     return { blob: await canvasBlob(canvas, format), scale }
   }
 
   fillSolid(ctx, targetWidth, targetHeight, background === 'auto' ? '#f8fafc' : background)
-  const focus = mode === 'smart' ? estimateFocus(bitmap) : { x: 0.5, y: 0.5 }
-  const scale = drawCover(ctx, bitmap, bitmap.width, bitmap.height, targetWidth, targetHeight, focus)
+  const focus = mode === 'smart' ? estimateFocus(image, sourceWidth, sourceHeight) : { x: 0.5, y: 0.5 }
+  const scale = drawCover(ctx, image, sourceWidth, sourceHeight, targetWidth, targetHeight, focus)
   return { blob: await canvasBlob(canvas, format), scale }
 }
 
 async function renderIcon(
-  bitmap: ImageBitmap,
+  image: CanvasImageSource,
+  sourceWidth: number,
+  sourceHeight: number,
   size: number,
   mode: IconFitMode,
   background: string,
@@ -231,21 +330,61 @@ async function renderIcon(
   const canvas = document.createElement('canvas')
   canvas.width = size
   canvas.height = size
-  const ctx = canvas.getContext('2d')!
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Unable to create app icon output canvas')
   ctx.imageSmoothingEnabled = true
   ctx.imageSmoothingQuality = 'high'
 
   if (background !== 'transparent') fillSolid(ctx, size, size, background)
-  if (mode === 'fill') drawCover(ctx, bitmap, bitmap.width, bitmap.height, size, size)
-  else {
+  if (mode === 'fill') {
+    drawCover(ctx, image, sourceWidth, sourceHeight, size, size)
+  } else {
     const inset = Math.round(size * 0.08)
     const inner = size - inset * 2
-    const scale = Math.min(inner / bitmap.width, inner / bitmap.height)
-    const width = bitmap.width * scale
-    const height = bitmap.height * scale
-    ctx.drawImage(bitmap, (size - width) / 2, (size - height) / 2, width, height)
+    const scale = Math.min(inner / sourceWidth, inner / sourceHeight)
+    const width = sourceWidth * scale
+    const height = sourceHeight * scale
+    ctx.drawImage(image, (size - width) / 2, (size - height) / 2, width, height)
   }
   return canvasBlob(canvas, 'png')
+}
+
+async function createStreamingZip(entries: ZipEntry[]) {
+  return new Promise<Blob>((resolve, reject) => {
+    const chunks: Uint8Array[] = []
+    let settled = false
+    const zip = new Zip((error, data, final) => {
+      if (settled) return
+      if (error) {
+        settled = true
+        reject(error)
+        return
+      }
+      chunks.push(data)
+      if (final) {
+        settled = true
+        resolve(new Blob(chunks.map((chunk) => chunk.slice().buffer), { type: 'application/zip' }))
+      }
+    })
+
+    ;(async () => {
+      try {
+        for (const entry of entries) {
+          const file = new ZipDeflate(entry.path, { level: 6 })
+          zip.add(file)
+          const bytes = entry.bytes ?? new Uint8Array(await entry.blob!.arrayBuffer())
+          file.push(bytes, true)
+          await Promise.resolve()
+        }
+        zip.end()
+      } catch (error) {
+        if (!settled) {
+          settled = true
+          reject(error)
+        }
+      }
+    })()
+  })
 }
 
 export function initStoreAssets() {
@@ -294,6 +433,8 @@ export function initStoreAssets() {
   let iconSource: ScreenshotSource | undefined
   let iconBackground = 'transparent'
   let iconOutputs: IconOutput[] = []
+  let screenshotRevision = 0
+  let iconRevision = 0
 
   function revokeScreenshotOutputs() {
     for (const item of screenshotOutputs) URL.revokeObjectURL(item.url)
@@ -307,6 +448,18 @@ export function initStoreAssets() {
     iconOutputs = []
     iconResults.replaceChildren()
     iconZipButton.disabled = true
+  }
+
+  function invalidateScreenshots(message?: string) {
+    screenshotRevision += 1
+    revokeScreenshotOutputs()
+    if (message) screenshotStatus.textContent = message
+  }
+
+  function invalidateIcons(message?: string) {
+    iconRevision += 1
+    revokeIconOutputs()
+    if (message) iconStatus.textContent = message
   }
 
   function setView(view: 'screenshots' | 'icon') {
@@ -325,6 +478,7 @@ export function initStoreAssets() {
     if (index < 0 || target < 0 || target >= screenshotSources.length) return
     const [item] = screenshotSources.splice(index, 1)
     screenshotSources.splice(target, 0, item)
+    invalidateScreenshots('Screenshot order changed — generate again when ready.')
     renderSourceList()
   }
 
@@ -333,8 +487,11 @@ export function initStoreAssets() {
     if (index < 0) return
     URL.revokeObjectURL(screenshotSources[index].url)
     screenshotSources.splice(index, 1)
-    revokeScreenshotOutputs()
+    invalidateScreenshots()
     renderSourceList()
+    screenshotStatus.textContent = screenshotSources.length
+      ? `${screenshotSources.length} screenshot${screenshotSources.length === 1 ? '' : 's'} ready.`
+      : 'No screenshots added.'
   }
 
   function renderSourceList() {
@@ -394,6 +551,7 @@ export function initStoreAssets() {
         if (from < 0 || to < 0) return
         const [moving] = screenshotSources.splice(from, 1)
         screenshotSources.splice(to, 0, moving)
+        invalidateScreenshots('Screenshot order changed — generate again when ready.')
         renderSourceList()
       })
 
@@ -405,23 +563,26 @@ export function initStoreAssets() {
   async function addScreenshotFiles(files: FileList | File[]) {
     const images = [...files].filter((file) => file.type.startsWith('image/'))
     const remaining = Math.max(0, 10 - screenshotSources.length)
+    if (!remaining) {
+      screenshotStatus.textContent = 'Maximum 10 screenshots.'
+      return
+    }
+
+    screenshotStatus.textContent = 'Reading screenshots…'
     for (const file of images.slice(0, remaining)) {
-      const bitmap = await createImageBitmap(file)
-      const source: ScreenshotSource = {
+      const decoded = await decodeStoreFile(file)
+      screenshotSources.push({
         id: `shot-${Date.now()}-${Math.random().toString(36).slice(2)}`,
         file,
         url: URL.createObjectURL(file),
-        width: bitmap.width,
-        height: bitmap.height,
-      }
-      bitmap.close()
-      screenshotSources.push(source)
+        width: decoded.sourceWidth,
+        height: decoded.sourceHeight,
+      })
+      await Promise.resolve()
     }
-    revokeScreenshotOutputs()
+    invalidateScreenshots()
     renderSourceList()
-    screenshotStatus.textContent = screenshotSources.length
-      ? `${screenshotSources.length} screenshot${screenshotSources.length === 1 ? '' : 's'} ready.`
-      : 'No screenshots added.'
+    screenshotStatus.textContent = `${screenshotSources.length} screenshot${screenshotSources.length === 1 ? '' : 's'} ready.`
   }
 
   function selectedPresets() {
@@ -455,6 +616,7 @@ export function initStoreAssets() {
     const image = document.createElement('img')
     image.src = item.url
     image.alt = item.label
+    image.loading = 'lazy'
     preview.append(image)
 
     const body = document.createElement('div')
@@ -491,6 +653,7 @@ export function initStoreAssets() {
       return
     }
 
+    const revision = ++screenshotRevision
     revokeScreenshotOutputs()
     generateScreenshotsButton.disabled = true
     screenshotStatus.textContent = 'Generating store screenshots locally…'
@@ -502,47 +665,51 @@ export function initStoreAssets() {
       let completed = 0
       const expected = screenshotSources.reduce((count, _source, index) => count + presets.filter((preset) => !preset.feature || index === 0).length, 0)
       for (let sourceIndex = 0; sourceIndex < screenshotSources.length; sourceIndex++) {
+        if (revision !== screenshotRevision) return
         const source = screenshotSources[sourceIndex]
-        const bitmap = await createEnhancedStoreBitmap(source.file)
-        try {
-          for (const preset of presets) {
-            if (preset.feature && sourceIndex !== 0) continue
-            const rendered = await renderScreenshot(bitmap, preset.width, preset.height, mode, screenshotBackground, format)
-            const order = String(sourceIndex + 1).padStart(2, '0')
-            const orientation = preset.width >= preset.height ? 'landscape' : 'portrait'
-            const base = safeBaseName(source.file.name)
-            const filename = `${order}-${base}-${preset.id}-${preset.width}x${preset.height}.${extension}`
-            const folder = preset.platform === 'google'
-              ? `app-store-assets/screenshots/google-play/${preset.category}`
-              : `app-store-assets/screenshots/apple-app-store/${preset.category}`
-            const output: StoreOutput = {
-              id: `${source.id}-${preset.id}`,
-              blob: rendered.blob,
-              url: URL.createObjectURL(rendered.blob),
-              filename,
-              folder,
-              label: `${preset.label} · ${orientation}`,
-              width: preset.width,
-              height: preset.height,
-              sourceName: source.file.name,
-              quality: upscaleLabel(rendered.scale),
-              upscale: rendered.scale,
-            }
-            screenshotOutputs.push(output)
-            screenshotResults.append(outputCard(output))
-            completed += 1
-            screenshotStatus.textContent = `Generated ${completed} / ${expected}`
+        const decoded = await decodeStoreFile(source.file)
+        if (decoded.scaled) {
+          screenshotStatus.textContent = `Optimized ${decoded.sourceWidth} × ${decoded.sourceHeight} source for memory-safe processing…`
+        }
+        for (const preset of presets) {
+          if (revision !== screenshotRevision) return
+          if (preset.feature && sourceIndex !== 0) continue
+          const rendered = await renderScreenshot(decoded.canvas, decoded.width, decoded.height, preset.width, preset.height, mode, screenshotBackground, format)
+          if (revision !== screenshotRevision) return
+          const order = String(sourceIndex + 1).padStart(2, '0')
+          const orientation = preset.width >= preset.height ? 'landscape' : 'portrait'
+          const base = safeBaseName(source.file.name)
+          const filename = `${order}-${base}-${preset.id}-${preset.width}x${preset.height}.${extension}`
+          const folder = preset.platform === 'google'
+            ? `app-store-assets/screenshots/google-play/${preset.category}`
+            : `app-store-assets/screenshots/apple-app-store/${preset.category}`
+          const output: StoreOutput = {
+            id: `${source.id}-${preset.id}`,
+            blob: rendered.blob,
+            url: URL.createObjectURL(rendered.blob),
+            filename,
+            folder,
+            label: `${preset.label} · ${orientation}`,
+            width: preset.width,
+            height: preset.height,
+            sourceName: source.file.name,
+            quality: upscaleLabel(rendered.scale),
+            upscale: rendered.scale,
           }
-        } finally {
-          bitmap.close()
+          screenshotOutputs.push(output)
+          screenshotResults.append(outputCard(output))
+          completed += 1
+          screenshotStatus.textContent = `Generated ${completed} / ${expected}`
+          await Promise.resolve()
         }
       }
+      if (revision !== screenshotRevision) return
       screenshotZipButton.disabled = screenshotOutputs.length === 0
       screenshotStatus.textContent = `Done — ${screenshotOutputs.length} store asset${screenshotOutputs.length === 1 ? '' : 's'} generated.`
     } catch (error) {
-      screenshotStatus.textContent = `Error: ${error instanceof Error ? error.message : String(error)}`
+      if (revision === screenshotRevision) screenshotStatus.textContent = `Error: ${error instanceof Error ? error.message : String(error)}`
     } finally {
-      generateScreenshotsButton.disabled = false
+      if (revision === screenshotRevision) generateScreenshotsButton.disabled = false
     }
   }
 
@@ -551,11 +718,7 @@ export function initStoreAssets() {
     screenshotZipButton.disabled = true
     screenshotStatus.textContent = 'Creating screenshots ZIP…'
     try {
-      const files: Record<string, Uint8Array> = {}
-      for (const output of screenshotOutputs) {
-        files[`${output.folder}/${output.filename}`] = new Uint8Array(await output.blob.arrayBuffer())
-      }
-      files['app-store-assets/screenshots/manifest.json'] = strToU8(JSON.stringify({
+      const manifest = strToU8(JSON.stringify({
         generatedAt: new Date().toISOString(),
         resizeMode: resizeModeSelect.value,
         background: screenshotBackground,
@@ -568,11 +731,15 @@ export function initStoreAssets() {
           quality: item.quality,
         })),
       }, null, 2))
-      const zipped = zipSync(files, { level: 6 })
-      download(new Blob([zipped.slice().buffer], { type: 'application/zip' }), 'app-store-screenshots.zip')
+      const entries: ZipEntry[] = screenshotOutputs.map((output) => ({ path: `${output.folder}/${output.filename}`, blob: output.blob }))
+      entries.push({ path: 'app-store-assets/screenshots/manifest.json', bytes: manifest })
+      const zip = await createStreamingZip(entries)
+      download(zip, 'app-store-screenshots.zip')
       screenshotStatus.textContent = 'Screenshots ZIP ready.'
+    } catch (error) {
+      screenshotStatus.textContent = `ZIP error: ${error instanceof Error ? error.message : String(error)}`
     } finally {
-      screenshotZipButton.disabled = false
+      screenshotZipButton.disabled = screenshotOutputs.length === 0
     }
   }
 
@@ -593,21 +760,22 @@ export function initStoreAssets() {
       iconStatus.textContent = 'Choose an image file.'
       return
     }
+    iconStatus.textContent = 'Reading icon…'
+    const decoded = await decodeStoreFile(file)
     if (iconSource) URL.revokeObjectURL(iconSource.url)
-    revokeIconOutputs()
-    const bitmap = await createImageBitmap(file)
+    invalidateIcons()
     iconSource = {
       id: `icon-${Date.now()}`,
       file,
       url: URL.createObjectURL(file),
-      width: bitmap.width,
-      height: bitmap.height,
+      width: decoded.sourceWidth,
+      height: decoded.sourceHeight,
     }
-    bitmap.close()
     const squareWarning = iconSource.width === iconSource.height ? '' : ' · Non-square source: Fit is recommended.'
     const resolutionWarning = Math.min(iconSource.width, iconSource.height) < 1024 ? ' · Source is below 1024 px and may look soft.' : ''
     iconSourceInfo.textContent = `${iconSource.width} × ${iconSource.height}${squareWarning}${resolutionWarning}`
     updateIconPreview()
+    iconStatus.textContent = 'Icon ready.'
   }
 
   async function generateIcons() {
@@ -615,13 +783,14 @@ export function initStoreAssets() {
       iconStatus.textContent = 'Choose an icon first.'
       return
     }
+    const revision = ++iconRevision
     revokeIconOutputs()
     generateIconsButton.disabled = true
     iconStatus.textContent = 'Generating app icons locally…'
-    const bitmap = await createEnhancedStoreBitmap(iconSource.file)
-    const mode = iconFitMode.value as IconFitMode
 
     try {
+      const decoded = await decodeStoreFile(iconSource.file)
+      const mode = iconFitMode.value as IconFitMode
       const specs = [
         { id: 'master', folder: 'app-store-assets/icons/master', filename: 'master-1024.png', label: 'Master icon', size: 1024 },
         { id: 'google-512', folder: 'app-store-assets/icons/google-play', filename: 'icon-512.png', label: 'Google Play icon', size: 512 },
@@ -629,8 +798,10 @@ export function initStoreAssets() {
       ]
 
       for (let index = 0; index < specs.length; index++) {
+        if (revision !== iconRevision) return
         const spec = specs[index]
-        const blob = await renderIcon(bitmap, spec.size, mode, iconBackground)
+        const blob = await renderIcon(decoded.canvas, decoded.width, decoded.height, spec.size, mode, iconBackground)
+        if (revision !== iconRevision) return
         const output: IconOutput = {
           id: spec.id,
           blob,
@@ -644,6 +815,7 @@ export function initStoreAssets() {
         iconOutputs.push(output)
         iconResults.append(outputCard(output, true))
         iconStatus.textContent = `Generated ${index + 1} / ${specs.length}`
+        await Promise.resolve()
       }
       iconZipButton.disabled = false
       const alphaWarning = iconBackground === 'transparent'
@@ -651,10 +823,9 @@ export function initStoreAssets() {
         : ''
       iconStatus.textContent = `Done — ${iconOutputs.length} icons generated.${alphaWarning}`
     } catch (error) {
-      iconStatus.textContent = `Error: ${error instanceof Error ? error.message : String(error)}`
+      if (revision === iconRevision) iconStatus.textContent = `Error: ${error instanceof Error ? error.message : String(error)}`
     } finally {
-      bitmap.close()
-      generateIconsButton.disabled = false
+      if (revision === iconRevision) generateIconsButton.disabled = false
     }
   }
 
@@ -663,11 +834,7 @@ export function initStoreAssets() {
     iconZipButton.disabled = true
     iconStatus.textContent = 'Creating icons ZIP…'
     try {
-      const files: Record<string, Uint8Array> = {}
-      for (const output of iconOutputs) {
-        files[`${output.folder}/${output.filename}`] = new Uint8Array(await output.blob.arrayBuffer())
-      }
-      files['app-store-assets/icons/manifest.json'] = strToU8(JSON.stringify({
+      const manifest = strToU8(JSON.stringify({
         generatedAt: new Date().toISOString(),
         source: iconSource?.file.name,
         sourceSize: iconSource ? { width: iconSource.width, height: iconSource.height } : null,
@@ -676,24 +843,39 @@ export function initStoreAssets() {
         roundedCornersBakedIn: false,
         files: iconOutputs.map((item) => ({ filename: `${item.folder}/${item.filename}`, width: item.width, height: item.height })),
       }, null, 2))
-      const zipped = zipSync(files, { level: 6 })
-      download(new Blob([zipped.slice().buffer], { type: 'application/zip' }), 'app-icons.zip')
+      const entries: ZipEntry[] = iconOutputs.map((output) => ({ path: `${output.folder}/${output.filename}`, blob: output.blob }))
+      entries.push({ path: 'app-store-assets/icons/manifest.json', bytes: manifest })
+      const zip = await createStreamingZip(entries)
+      download(zip, 'app-icons.zip')
       iconStatus.textContent = 'Icons ZIP ready.'
+    } catch (error) {
+      iconStatus.textContent = `ZIP error: ${error instanceof Error ? error.message : String(error)}`
     } finally {
-      iconZipButton.disabled = false
+      iconZipButton.disabled = iconOutputs.length === 0
     }
   }
+
+  const screenshotSettingChanged = () => invalidateScreenshots('Settings changed — generate screenshot assets when ready.')
+  platformSelect.addEventListener('change', screenshotSettingChanged)
+  orientationSelect.addEventListener('change', screenshotSettingChanged)
+  resizeModeSelect.addEventListener('change', screenshotSettingChanged)
+  formatSelect.addEventListener('change', screenshotSettingChanged)
+  presetChecks.forEach((input) => input.addEventListener('change', screenshotSettingChanged))
 
   storeViewButtons.forEach((button) => button.addEventListener('click', () => setView(button.dataset.storeView === 'icon' ? 'icon' : 'screenshots')))
 
   screenshotPick.addEventListener('click', () => screenshotInput.click())
-  screenshotInput.addEventListener('change', () => screenshotInput.files && addScreenshotFiles(screenshotInput.files))
+  screenshotInput.addEventListener('change', () => {
+    const files = screenshotInput.files
+    screenshotInput.value = ''
+    if (files) void addScreenshotFiles(files).catch((error) => { screenshotStatus.textContent = `Error: ${error instanceof Error ? error.message : String(error)}` })
+  })
   screenshotDrop.addEventListener('dragover', (event) => { event.preventDefault(); screenshotDrop.classList.add('drag') })
   screenshotDrop.addEventListener('dragleave', () => screenshotDrop.classList.remove('drag'))
   screenshotDrop.addEventListener('drop', (event) => {
     event.preventDefault()
     screenshotDrop.classList.remove('drag')
-    if (event.dataTransfer?.files) addScreenshotFiles(event.dataTransfer.files)
+    if (event.dataTransfer?.files) void addScreenshotFiles(event.dataTransfer.files).catch((error) => { screenshotStatus.textContent = `Error: ${error instanceof Error ? error.message : String(error)}` })
   })
   screenshotBgButtons.forEach((button) => button.addEventListener('click', () => {
     screenshotBackground = button.dataset.storeBg ?? 'auto'
@@ -702,25 +884,31 @@ export function initStoreAssets() {
       candidate.classList.toggle('active', active)
       candidate.setAttribute('aria-pressed', String(active))
     })
+    screenshotSettingChanged()
   }))
   screenshotBgColor.addEventListener('input', () => {
     screenshotBackground = screenshotBgColor.value
     screenshotBgButtons.forEach((button) => { button.classList.remove('active'); button.setAttribute('aria-pressed', 'false') })
+    screenshotSettingChanged()
   })
-  generateScreenshotsButton.addEventListener('click', generateScreenshots)
-  screenshotZipButton.addEventListener('click', downloadScreenshotZip)
+  generateScreenshotsButton.addEventListener('click', () => void generateScreenshots())
+  screenshotZipButton.addEventListener('click', () => void downloadScreenshotZip())
 
   iconPick.addEventListener('click', () => iconInput.click())
-  iconInput.addEventListener('change', () => iconInput.files?.[0] && setIconFile(iconInput.files[0]))
+  iconInput.addEventListener('change', () => {
+    const file = iconInput.files?.[0]
+    iconInput.value = ''
+    if (file) void setIconFile(file).catch((error) => { iconStatus.textContent = `Error: ${error instanceof Error ? error.message : String(error)}` })
+  })
   iconDrop.addEventListener('dragover', (event) => { event.preventDefault(); iconDrop.classList.add('drag') })
   iconDrop.addEventListener('dragleave', () => iconDrop.classList.remove('drag'))
   iconDrop.addEventListener('drop', (event) => {
     event.preventDefault()
     iconDrop.classList.remove('drag')
     const file = event.dataTransfer?.files[0]
-    if (file) setIconFile(file)
+    if (file) void setIconFile(file).catch((error) => { iconStatus.textContent = `Error: ${error instanceof Error ? error.message : String(error)}` })
   })
-  iconFitMode.addEventListener('change', updateIconPreview)
+  iconFitMode.addEventListener('change', () => { updateIconPreview(); invalidateIcons('Icon settings changed — generate again when ready.') })
   iconBgButtons.forEach((button) => button.addEventListener('click', () => {
     iconBackground = button.dataset.iconBg ?? 'transparent'
     iconBgButtons.forEach((candidate) => {
@@ -729,14 +917,16 @@ export function initStoreAssets() {
       candidate.setAttribute('aria-pressed', String(active))
     })
     updateIconPreview()
+    invalidateIcons('Icon settings changed — generate again when ready.')
   }))
   iconBgColor.addEventListener('input', () => {
     iconBackground = iconBgColor.value
     iconBgButtons.forEach((button) => { button.classList.remove('active'); button.setAttribute('aria-pressed', 'false') })
     updateIconPreview()
+    invalidateIcons('Icon settings changed — generate again when ready.')
   })
-  generateIconsButton.addEventListener('click', generateIcons)
-  iconZipButton.addEventListener('click', downloadIconZip)
+  generateIconsButton.addEventListener('click', () => void generateIcons())
+  iconZipButton.addEventListener('click', () => void downloadIconZip())
 
   setView('screenshots')
 }

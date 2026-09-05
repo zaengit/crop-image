@@ -1,3 +1,4 @@
+# Runtime hardening CI
 name: CI
 
 on:
@@ -12,7 +13,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -22,10 +23,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: 1.98.1
           targets: wasm32-unknown-unknown
 
       - name: Cache Cargo
@@ -39,13 +42,16 @@ jobs:
           version: v0.13.1
 
       - name: Install JavaScript dependencies
-        run: npm install
+        run: npm ci
+
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
 
       - name: Fetch and verify AI models
         run: npm run model:fetch
 
       - name: Rust tests
-        run: cargo test --manifest-path crates/crop-image-wasm/Cargo.toml
+        run: cargo test --locked --manifest-path crates/crop-image-wasm/Cargo.toml
 
       - name: Build WASM bindings
         run: npm run wasm:build
@@ -55,3 +61,17 @@ jobs:
 
       - name: Build application
         run: npm run build:web
+
+      - name: Verify production worker artifact
+        run: |
+          test -n "$(find dist/assets -maxdepth 1 -name 'worker-*.js' -print -quit)"
+          test -z "$(find dist -name 'worker-*.ts' -print -quit)"
+          test -f dist/mediapipe-wasm/vision_wasm_internal.wasm || test -f dist/mediapipe-wasm/vision_wasm_nosimd_internal.wasm
+
+      - name: Install Chromium for smoke test
+        run: npx playwright install --with-deps chromium
+
+      - name: Production browser smoke test
+        run: |
+          npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/crop-image-preview.log 2>&1 &
+          npx playwright test tests/smoke.spec.js --reporter=line
