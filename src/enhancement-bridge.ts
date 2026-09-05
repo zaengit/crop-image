@@ -10,7 +10,7 @@ root.innerHTML = `
     <div>
       <p class="eyebrow">GLOBAL ENHANCE</p>
       <h2>Improve image quality</h2>
-      <p>Adjust once. The same enhancement is applied to every generated crop.</p>
+      <p>Enhancement is optional. Adjust the current image before generating crops if needed.</p>
     </div>
     <div class="enhance-actions">
       <button id="enhance-auto" class="primary" type="button">Auto Enhance</button>
@@ -35,7 +35,7 @@ root.innerHTML = `
     ${toggle('restorePhoto','Restore photo')}
     ${toggle('upscale2x','AI Upscale 2×')}
   </div>
-  <small id="enhance-status" class="enhance-status" aria-live="polite">Enhancement is applied locally to all generated sizes.</small>
+  <small id="enhance-status" class="enhance-status" aria-live="polite">Optional — crop can be generated without enhancement.</small>
 `
 
 function slider(key: keyof EnhancementSettings, label: string, min: number, max: number, value: number) {
@@ -53,14 +53,8 @@ let settings: EnhancementSettings = { ...DEFAULT_ENHANCEMENT }
 let latestWorker: Worker | undefined
 let timer: number | undefined
 let comparing = false
-let applyingPersistedSettings = false
 const status = root.querySelector<HTMLElement>('#enhance-status')!
 const focusImage = document.querySelector<HTMLImageElement>('#focus-image')
-
-function isDefaultSettings(value: EnhancementSettings) {
-  return (Object.keys(DEFAULT_ENHANCEMENT) as Array<keyof EnhancementSettings>)
-    .every((key) => value[key] === DEFAULT_ENHANCEMENT[key])
-}
 
 function isAiHeavy(value: EnhancementSettings) {
   return value.denoise >= 20 || value.deblur || value.restorePhoto || value.faceEnhance || value.upscale2x
@@ -175,17 +169,7 @@ function bindCropWorker(worker: Worker) {
   worker.addEventListener('message', (event) => {
     const message = event.data
     if (message?.type === 'enhancement-settings') {
-      const incoming = { ...DEFAULT_ENHANCEMENT, ...message.settings } as EnhancementSettings
-
-      if (!message.auto && isDefaultSettings(incoming) && !isDefaultSettings(settings) && !applyingPersistedSettings) {
-        applyingPersistedSettings = true
-        status.textContent = 'Applying global enhancement to this image…'
-        worker.postMessage({ type: 'enhancement', settings })
-        return
-      }
-
-      applyingPersistedSettings = false
-      settings = incoming
+      settings = { ...DEFAULT_ENHANCEMENT, ...message.settings } as EnhancementSettings
       syncControls()
       const restoreLabel = message.restoration
         ? message.restoration.method === 'ai'
@@ -206,16 +190,19 @@ function bindCropWorker(worker: Worker) {
         const suffix = [restoreLabel, faceLabel].filter(Boolean).map((label) => ` · ${label}`).join('')
         status.textContent = `${method} ${scale}× active — ${message.upscale.width} × ${message.upscale.height}${suffix}.`
       } else if (restoreLabel || faceLabel) {
-        status.textContent = `${[restoreLabel, faceLabel].filter(Boolean).join(' · ')} applied to all generated sizes.`
+        status.textContent = `${[restoreLabel, faceLabel].filter(Boolean).join(' · ')} applied to the current image.`
+      } else if (message.auto) {
+        status.textContent = 'Auto Enhance applied to the current image.'
       } else {
-        status.textContent = message.auto ? 'Auto Enhance applied to all generated sizes.' : 'Enhancement updated.'
+        status.textContent = Object.values(settings).some((value) => value !== 0 && value !== false)
+          ? 'Enhancement updated.'
+          : 'Optional — crop can be generated without enhancement.'
       }
     }
     if (message?.type === 'done' && !status.textContent?.startsWith('Auto Enhance') && !status.textContent?.includes('active —') && !status.textContent?.includes('Restoration') && !status.textContent?.includes('Face Enhance')) {
-      status.textContent = 'Enhancement is applied locally to all generated sizes.'
+      status.textContent = 'Optional — crop can be generated without enhancement.'
     }
     if (message?.type === 'error' && String(message.message ?? '').toLowerCase().includes('enhanc')) {
-      applyingPersistedSettings = false
       status.textContent = `Enhancement error: ${message.message}`
     }
   })
@@ -223,10 +210,7 @@ function bindCropWorker(worker: Worker) {
   const nativeTerminate = worker.terminate.bind(worker)
   worker.terminate = () => {
     nativeTerminate()
-    if (latestWorker === worker) {
-      latestWorker = undefined
-      applyingPersistedSettings = false
-    }
+    if (latestWorker === worker) latestWorker = undefined
   }
 }
 
