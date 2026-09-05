@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import { DEFAULT_ENHANCEMENT, type EnhancementSettings } from './enhance'
 
 type Props = {
@@ -39,11 +40,11 @@ export function enhancementPreviewFilter(settings: EnhancementSettings, comparin
 }
 
 export function EnhancementPanel(props: Props) {
-  const [draft, setDraft] = React.useState<EnhancementSettings>({ ...props.settings })
-  const timerRef = React.useRef<number | undefined>(undefined)
+  const [draft, setDraft] = useState<EnhancementSettings>({ ...props.settings })
+  const timerRef = useRef<number | undefined>(undefined)
 
-  React.useEffect(() => setDraft({ ...props.settings }), [props.settings])
-  React.useEffect(() => () => {
+  useEffect(() => setDraft({ ...props.settings }), [props.settings])
+  useEffect(() => () => {
     if (timerRef.current) window.clearTimeout(timerRef.current)
   }, [])
 

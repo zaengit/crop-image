@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import { useCropEngine, downloadBlob, humanBytes, type Generated } from './use-crop-engine'
 import type { PresetGroup } from './presets'
 import { EnhancementPanel, enhancementPreviewFilter } from './EnhancementPanel'
@@ -41,19 +42,19 @@ function OutputSettings({ engine }: { engine: any }) {
 
 export function App() {
   const engine = useCropEngine()
-  const [menu, setMenu] = React.useState<PresetGroup>('social')
-  const [draggingFocus, setDraggingFocus] = React.useState(false)
-  const [comparing, setComparing] = React.useState(false)
-  const [customWidth, setCustomWidth] = React.useState(1080)
-  const [customHeight, setCustomHeight] = React.useState(1080)
-  const [lockRatio, setLockRatio] = React.useState(false)
-  const [lockedRatio, setLockedRatio] = React.useState(1)
-  const [customError, setCustomError] = React.useState('')
-  const fileRef = React.useRef<any>(null)
-  const stageRef = React.useRef<any>(null)
-  const imageRef = React.useRef<any>(null)
+  const [menu, setMenu] = useState<PresetGroup>('social')
+  const [draggingFocus, setDraggingFocus] = useState(false)
+  const [comparing, setComparing] = useState(false)
+  const [customWidth, setCustomWidth] = useState(1080)
+  const [customHeight, setCustomHeight] = useState(1080)
+  const [lockRatio, setLockRatio] = useState(false)
+  const [lockedRatio, setLockedRatio] = useState(1)
+  const [customError, setCustomError] = useState('')
+  const fileRef = useRef<any>(null)
+  const stageRef = useRef<any>(null)
+  const imageRef = useRef<any>(null)
 
-  React.useEffect(() => {
+  useEffect(() => {
     document.documentElement.dataset.appReady = 'true'
     return () => { delete document.documentElement.dataset.appReady }
   }, [])
