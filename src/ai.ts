@@ -204,18 +204,23 @@ async function detectObjectSubject(rgba: Uint8ClampedArray, width: number, heigh
 }
 
 export async function detectFaces(rgba: Uint8ClampedArray, width: number, height: number): Promise<FocusRegion[]> {
+  let weakFace: FocusRegion | undefined
+
   try {
     const faces = await detectFaceRegions(rgba, width, height)
-    if (faces.length) return faces
+    const strongFaces = faces.filter((face) => face.confidence >= SCORE_THRESHOLD)
+    if (strongFaces.length) return strongFaces
+    weakFace = faces[0]
   } catch (error) {
     console.warn('Face detection failed; trying AI object focus fallback.', error)
   }
 
   try {
     const subject = await detectObjectSubject(rgba, width, height)
-    return subject ? [subject] : []
+    if (subject) return [subject]
   } catch (error) {
     console.warn('AI object focus fallback failed.', error)
-    return []
   }
+
+  return weakFace ? [weakFace] : []
 }
