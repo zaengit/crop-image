@@ -1,4 +1,5 @@
 import './batch-upload.css'
+import './enhancement-bridge'
 
 type BatchItem = {
   id: string
@@ -126,8 +127,6 @@ fileInput.addEventListener('change', () => {
 
 batchAdd.addEventListener('click', () => fileInput.click())
 
-// Capture drops first so every image is retained in the tray. The existing app
-// drop handler can still process the first image immediately.
 dropzone.addEventListener('drop', (event) => {
   if (event.dataTransfer?.files?.length) addFiles(event.dataTransfer.files)
 }, { capture: true })
@@ -136,5 +135,4 @@ window.addEventListener('beforeunload', () => {
   for (const item of items) cleanupItem(item)
 })
 
-// Keep the primary chooser wording correct even if another script changes it.
 pick.textContent = 'Choose images'
