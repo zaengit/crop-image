@@ -154,9 +154,24 @@ compare.addEventListener('pointerleave', endCompare)
 compare.addEventListener('keydown', (event) => { if (event.key === ' ' || event.key === 'Enter') beginCompare() })
 compare.addEventListener('keyup', endCompare)
 
+let trackedCropWorker: Worker | undefined
+
 function bindCropWorker(worker: Worker) {
+  if (trackedCropWorker === worker) return
+  trackedCropWorker = worker
   latestWorker = worker
   root.hidden = false
+
+  const nativeTerminate = worker.terminate.bind(worker)
+  worker.terminate = () => {
+    nativeTerminate()
+    if (trackedCropWorker === worker) {
+      trackedCropWorker = undefined
+      latestWorker = undefined
+      applyingPersistedSettings = false
+    }
+  }
+
   worker.addEventListener('message', (event) => {
     const message = event.data
     if (message?.type === 'enhancement-settings') {
@@ -206,29 +221,30 @@ function bindCropWorker(worker: Worker) {
   })
 }
 
-const NativeWorker = window.Worker
-let trackedCropWorker: Worker | undefined
-const TrackingWorker = new Proxy(NativeWorker, {
-  construct(target, args) {
-    const worker = Reflect.construct(target, args) as Worker
-    // Only bind the first application worker. ONNX/MediaPipe or future auxiliary
-    // workers must never replace the crop worker used by the global controls.
-    if (!trackedCropWorker) {
-      trackedCropWorker = worker
-      bindCropWorker(worker)
-      const nativeTerminate = worker.terminate.bind(worker)
-      worker.terminate = () => {
-        nativeTerminate()
-        if (trackedCropWorker === worker) {
-          trackedCropWorker = undefined
-          latestWorker = undefined
-          applyingPersistedSettings = false
-        }
-      }
-    }
-    return worker
-  },
-}) as typeof Worker
-Object.defineProperty(window, 'Worker', { configurable: true, writable: true, value: TrackingWorker })
+function isCropLoadMessage(message: unknown): message is { type: 'load'; rgba: ArrayBuffer; width: number; height: number } {
+  if (!message || typeof message !== 'object') return false
+  const candidate = message as Record<string, unknown>
+  return candidate.type === 'load'
+    && candidate.rgba instanceof ArrayBuffer
+    && typeof candidate.width === 'number'
+    && typeof candidate.height === 'number'
+}
+
+// Register the crop worker by its first application-level load message instead of
+// replacing window.Worker. Auxiliary workers created by ONNX/MediaPipe are untouched.
+const nativePostMessage = Worker.prototype.postMessage
+const callNativePostMessage = nativePostMessage.call.bind(nativePostMessage) as (
+  worker: Worker,
+  message: unknown,
+  transferOrOptions?: Transferable[] | StructuredSerializeOptions,
+) => void
+
+Worker.prototype.postMessage = function (
+  message: unknown,
+  transferOrOptions?: Transferable[] | StructuredSerializeOptions,
+) {
+  if (isCropLoadMessage(message)) bindCropWorker(this)
+  callNativePostMessage(this, message, transferOrOptions)
+} as Worker['postMessage']
 
 syncControls()
