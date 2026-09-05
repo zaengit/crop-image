@@ -141,7 +141,7 @@ compare.addEventListener('keydown', (event) => { if (event.key === ' ' || event.
 compare.addEventListener('keyup', endCompare)
 
 const NativeWorker = window.Worker
-window.Worker = new Proxy(NativeWorker, {
+const TrackingWorker = new Proxy(NativeWorker, {
   construct(target, args) {
     const worker = Reflect.construct(target, args) as Worker
     latestWorker = worker
@@ -163,5 +163,6 @@ window.Worker = new Proxy(NativeWorker, {
     return worker
   },
 }) as typeof Worker
+Object.defineProperty(window, 'Worker', { configurable: true, writable: true, value: TrackingWorker })
 
 syncControls()
