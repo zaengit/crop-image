@@ -7,7 +7,7 @@ import { DEFAULT_ENHANCEMENT, enhanceRgba, type EnhancementSettings } from './en
 const NativeCreateImageBitmap = window.createImageBitmap.bind(window)
 const storeFiles = new WeakSet<File>()
 const callCounts = new WeakMap<File, number>()
-const enhancedBlobs = new WeakMap<File, Promise<Blob>>()
+const enhancedBlobs = new WeakMap<File, { key: string; blob: Promise<Blob> }>()
 
 function isStoreInput(target: EventTarget | null) {
   return target instanceof HTMLInputElement && (target.id === 'store-screenshot-input' || target.id === 'store-icon-input')
@@ -43,6 +43,10 @@ function settingsFromUi(): EnhancementSettings {
   return settings
 }
 
+function settingsKey(settings: EnhancementSettings) {
+  return JSON.stringify(settings)
+}
+
 function hasEnhancement(settings: EnhancementSettings) {
   return settings.brightness !== 0 || settings.contrast !== 0 || settings.highlights !== 0 || settings.shadows !== 0 ||
     settings.saturation !== 0 || settings.temperature !== 0 || settings.sharpness !== 0 || settings.denoise !== 0 ||
@@ -65,8 +69,7 @@ async function blobFromRgba(rgba: Uint8ClampedArray, width: number, height: numb
   return canvas.convertToBlob({ type: 'image/png' })
 }
 
-async function enhanceStoreFile(file: File) {
-  const settings = settingsFromUi()
+async function enhanceStoreFile(file: File, settings: EnhancementSettings) {
   if (!hasEnhancement(settings)) return file
 
   const bitmap = await NativeCreateImageBitmap(file)
@@ -127,10 +130,12 @@ window.createImageBitmap = (async (source: ImageBitmapSource, ...options: unknow
   // second decode onward, when the bitmap is actually used to generate outputs.
   if (count === 1) return NativeCreateImageBitmap(source, ...(options as []))
 
-  let enhanced = enhancedBlobs.get(source)
-  if (!enhanced) {
-    enhanced = enhanceStoreFile(source)
-    enhancedBlobs.set(source, enhanced)
+  const settings = settingsFromUi()
+  const key = settingsKey(settings)
+  let cached = enhancedBlobs.get(source)
+  if (!cached || cached.key !== key) {
+    cached = { key, blob: enhanceStoreFile(source, settings) }
+    enhancedBlobs.set(source, cached)
   }
-  return NativeCreateImageBitmap(await enhanced)
+  return NativeCreateImageBitmap(await cached.blob)
 }) as typeof window.createImageBitmap
