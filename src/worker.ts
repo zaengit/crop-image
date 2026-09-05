@@ -249,8 +249,14 @@ async function generatePresets(presets: ImagePreset[], manualFocus = currentManu
 }
 
 async function regenerateActive(mode: Mode) {
-  pendingMode = mode
   currentMode = mode
+  if (!activePresets.size) {
+    pendingMode = undefined
+    if (mode.kind === 'auto') postAutoFocusPoint()
+    return
+  }
+
+  pendingMode = mode
   if (generating) return
   generating = true
   try {
@@ -362,6 +368,7 @@ type WorkerMessage =
   | { type: 'focus'; x: number; y: number }
   | { type: 'auto' }
   | { type: 'settings'; format: OutputFormat; quality: number }
+  | { type: 'social' }
   | { type: 'passport' }
   | { type: 'background'; value: string }
   | { type: 'custom'; preset: ImagePreset }
@@ -379,26 +386,41 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
       await applyEnhancement(autoEnhancement(sourceRgba), true)
       return
     }
-    if (event.data.type === 'settings') { outputFormat = event.data.format; outputQuality = Math.min(1, Math.max(0.1, event.data.quality)); await regenerateActive(currentMode); return }
+    if (event.data.type === 'settings') {
+      outputFormat = event.data.format
+      outputQuality = Math.min(1, Math.max(0.1, event.data.quality))
+      await regenerateActive(currentMode)
+      return
+    }
     if (event.data.type === 'focus') { await regenerateActive({ kind: 'focus', x: event.data.x, y: event.data.y }); return }
     if (event.data.type === 'auto') { await regenerateActive({ kind: 'auto' }); return }
+    if (event.data.type === 'social') {
+      for (const preset of SOCIAL_PRESETS) activePresets.set(preset.id, preset)
+      await generatePresets(SOCIAL_PRESETS, currentManualFocus(), true)
+      self.postMessage({ type: 'done', manual: currentMode.kind === 'focus', format: outputFormat, quality: outputQuality })
+      return
+    }
     if (event.data.type === 'passport') {
-      const fresh = PASSPORT_PRESETS.filter((preset) => !activePresets.has(preset.id))
       for (const preset of PASSPORT_PRESETS) activePresets.set(preset.id, preset)
-      if (fresh.length) await generatePresets(fresh, currentManualFocus())
-      self.postMessage({ type: 'done', manual: currentMode.kind === 'focus', format: outputFormat, quality: outputQuality }); return
+      await generatePresets(PASSPORT_PRESETS, currentManualFocus(), true)
+      self.postMessage({ type: 'done', manual: currentMode.kind === 'focus', format: outputFormat, quality: outputQuality })
+      return
     }
     if (event.data.type === 'background') {
-      for (const preset of PASSPORT_PRESETS) activePresets.set(preset.id, preset)
       await composePassportBackground(event.data.value)
       self.postMessage({ type: 'background-ready', value: passportBackground })
-      await generatePresets(PASSPORT_PRESETS, currentManualFocus(), true)
-      self.postMessage({ type: 'done', manual: currentMode.kind === 'focus', format: outputFormat, quality: outputQuality }); return
+      const activePassport = [...activePresets.values()].filter((preset) => preset.group === 'passport')
+      if (activePassport.length) {
+        await generatePresets(activePassport, currentManualFocus(), true)
+        self.postMessage({ type: 'done', manual: currentMode.kind === 'focus', format: outputFormat, quality: outputQuality })
+      }
+      return
     }
     if (event.data.type === 'custom') {
       activePresets.set(event.data.preset.id, event.data.preset)
       await generatePresets([event.data.preset], currentManualFocus())
-      self.postMessage({ type: 'done', manual: currentMode.kind === 'focus', format: outputFormat, quality: outputQuality }); return
+      self.postMessage({ type: 'done', manual: currentMode.kind === 'focus', format: outputFormat, quality: outputQuality })
+      return
     }
     if (event.data.type === 'remove-custom') { activePresets.delete(event.data.id); return }
 
@@ -418,14 +440,12 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
     pendingMode = undefined
     currentMode = { kind: 'auto' }
     activePresets.clear()
-    for (const preset of SOCIAL_PRESETS) activePresets.set(preset.id, preset)
     self.postMessage({ type: 'status', message: 'Finding the subject…' })
     try { cachedFocus = await detectFaces(cachedRgba, cachedWidth, cachedHeight) }
     catch (error) { console.warn('Face detector unavailable; using smart-crop fallback.', error) }
     postAutoFocusPoint()
     self.postMessage({ type: 'enhancement-settings', settings: enhancementSettings, auto: false })
-    await generatePresets(SOCIAL_PRESETS)
-    self.postMessage({ type: 'done', manual: false, format: outputFormat, quality: outputQuality })
+    self.postMessage({ type: 'ready' })
   } catch (error) {
     self.postMessage({ type: 'error', message: error instanceof Error ? error.message : String(error) })
   }
