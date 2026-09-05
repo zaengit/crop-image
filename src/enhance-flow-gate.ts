@@ -27,6 +27,7 @@ function beginNewMaster() {
   hasImage = true
   enhancementRequested = false
   setCropEnabled(false)
+  if (enhanceStatus) enhanceStatus.textContent = 'Enhance this image first. Crop generation unlocks when enhancement is complete.'
 }
 
 function markEnhancementRequested() {
@@ -64,8 +65,15 @@ enhanceRoot?.addEventListener('click', (event) => {
 
 if (enhanceStatus) {
   const observer = new MutationObserver(() => {
-    if (!hasImage || !enhancementRequested || masterReady) return
-    if (isEnhancementSuccess(enhanceStatus.textContent ?? '')) setCropEnabled(true)
+    const text = enhanceStatus.textContent ?? ''
+    if (!hasImage) return
+    if (!enhancementRequested) {
+      if (text === 'Enhancement updated.') {
+        enhanceStatus.textContent = 'Enhance this image first. Crop generation unlocks when enhancement is complete.'
+      }
+      return
+    }
+    if (!masterReady && isEnhancementSuccess(text)) setCropEnabled(true)
   })
   observer.observe(enhanceStatus, { childList: true, subtree: true, characterData: true })
 }
