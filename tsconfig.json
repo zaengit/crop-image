@@ -8,6 +8,7 @@
     "skipLibCheck": true,
     "moduleResolution": "Bundler",
     "allowImportingTsExtensions": true,
+    "allowUmdGlobalAccess": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
     "noEmit": true,
