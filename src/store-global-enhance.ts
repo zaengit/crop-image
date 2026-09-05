@@ -4,28 +4,7 @@ import { aiUpscale2x } from './ai-upscale'
 import { detectFaces } from './ai'
 import { DEFAULT_ENHANCEMENT, enhanceRgba, type EnhancementSettings } from './enhance'
 
-const NativeCreateImageBitmap = window.createImageBitmap.bind(window)
-const storeFiles = new WeakSet<File>()
-const callCounts = new WeakMap<File, number>()
 const enhancedBlobs = new WeakMap<File, { key: string; blob: Promise<Blob> }>()
-
-function isStoreInput(target: EventTarget | null) {
-  return target instanceof HTMLInputElement && (target.id === 'store-screenshot-input' || target.id === 'store-icon-input')
-}
-
-document.addEventListener('change', (event) => {
-  if (!isStoreInput(event.target)) return
-  const input = event.target as HTMLInputElement
-  for (const file of input.files ?? []) storeFiles.add(file)
-}, true)
-
-document.addEventListener('drop', (event) => {
-  const target = event.target instanceof Element ? event.target.closest('#store-screenshot-drop, #store-icon-drop') : null
-  if (!target) return
-  for (const file of event.dataTransfer?.files ?? []) {
-    if (file.type.startsWith('image/')) storeFiles.add(file)
-  }
-}, true)
 
 function settingsFromUi(): EnhancementSettings {
   const settings: EnhancementSettings = { ...DEFAULT_ENHANCEMENT }
@@ -72,7 +51,7 @@ async function blobFromRgba(rgba: Uint8ClampedArray, width: number, height: numb
 async function enhanceStoreFile(file: File, settings: EnhancementSettings) {
   if (!hasEnhancement(settings)) return file
 
-  const bitmap = await NativeCreateImageBitmap(file)
+  const bitmap = await createImageBitmap(file)
   try {
     let width = bitmap.width
     let height = bitmap.height
@@ -119,23 +98,13 @@ async function enhanceStoreFile(file: File, settings: EnhancementSettings) {
   }
 }
 
-window.createImageBitmap = (async (source: ImageBitmapSource, ...options: unknown[]) => {
-  if (!(source instanceof File) || !storeFiles.has(source)) {
-    return NativeCreateImageBitmap(source, ...(options as []))
-  }
-
-  const count = (callCounts.get(source) ?? 0) + 1
-  callCounts.set(source, count)
-  // The Store module's first decode only reads source dimensions. Enhance from the
-  // second decode onward, when the bitmap is actually used to generate outputs.
-  if (count === 1) return NativeCreateImageBitmap(source, ...(options as []))
-
+export async function createEnhancedStoreBitmap(file: File) {
   const settings = settingsFromUi()
   const key = settingsKey(settings)
-  let cached = enhancedBlobs.get(source)
+  let cached = enhancedBlobs.get(file)
   if (!cached || cached.key !== key) {
-    cached = { key, blob: enhanceStoreFile(source, settings) }
-    enhancedBlobs.set(source, cached)
+    cached = { key, blob: enhanceStoreFile(file, settings) }
+    enhancedBlobs.set(file, cached)
   }
-  return NativeCreateImageBitmap(await cached.blob)
-}) as typeof window.createImageBitmap
+  return createImageBitmap(await cached.blob)
+}
