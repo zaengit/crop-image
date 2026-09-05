@@ -33,7 +33,7 @@ root.innerHTML = `
     ${toggle('faceEnhance','Face enhance')}
     ${toggle('deblur','Deblur')}
     ${toggle('restorePhoto','Restore photo')}
-    ${toggle('upscale2x','Upscale 2×')}
+    ${toggle('upscale2x','AI Upscale 2×')}
   </div>
   <small id="enhance-status" class="enhance-status" aria-live="polite">Enhancement is applied locally to all generated sizes.</small>
 `
@@ -115,7 +115,7 @@ root.querySelectorAll<HTMLButtonElement>('[data-enhance-toggle]').forEach((butto
     const key = button.dataset.enhanceToggle as keyof EnhancementSettings
     ;(settings as unknown as Record<string, boolean>)[key] = !Boolean(settings[key])
     syncControls()
-    sendEnhancement(key === 'upscale2x' && settings.upscale2x ? 'Upscaling working image for all outputs…' : 'Applying enhancement…')
+    sendEnhancement(key === 'upscale2x' && settings.upscale2x ? 'Preparing AI super resolution…' : 'Applying enhancement…')
   })
 })
 
@@ -154,12 +154,13 @@ const TrackingWorker = new Proxy(NativeWorker, {
         syncControls()
         if (message.upscale) {
           const scale = Number(message.upscale.scale ?? 1).toFixed(2).replace(/\.00$/, '')
-          status.textContent = `Upscale ${scale}× active — ${message.upscale.width} × ${message.upscale.height} working image.`
+          const method = message.upscale.method === 'ai' ? 'AI Super Resolution' : 'high-quality fallback'
+          status.textContent = `${method} ${scale}× active — ${message.upscale.width} × ${message.upscale.height}.`
         } else {
           status.textContent = message.auto ? 'Auto Enhance applied to all generated sizes.' : 'Enhancement updated.'
         }
       }
-      if (message?.type === 'done' && !status.textContent?.startsWith('Auto Enhance') && !status.textContent?.startsWith('Upscale')) {
+      if (message?.type === 'done' && !status.textContent?.startsWith('Auto Enhance') && !status.textContent?.includes('active —')) {
         status.textContent = 'Enhancement is applied locally to all generated sizes.'
       }
       if (message?.type === 'error' && String(message.message ?? '').toLowerCase().includes('enhanc')) {

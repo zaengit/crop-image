@@ -14,6 +14,11 @@ const models = [
     target: resolve('public/models/selfie_segmenter.tflite'),
     url: 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite',
   },
+  {
+    name: 'Real-ESRGAN 2x',
+    target: resolve('public/models/realesrgan_x2plus.onnx'),
+    url: 'https://github.com/net2cn/Real-ESRGAN_GUI/raw/refs/heads/master/Real-ESRGAN_GUI/models/realesrgan_x2plus.onnx',
+  },
 ]
 
 async function downloadModel({ name, target, url }) {
