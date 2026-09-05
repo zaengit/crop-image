@@ -5,4 +5,7 @@ export default defineConfig(({ command }) => ({
   build: {
     target: 'es2022',
   },
+  worker: {
+    format: 'es',
+  },
 }))
