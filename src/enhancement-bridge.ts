@@ -188,18 +188,18 @@ function bindCropWorker(worker: Worker) {
         const scale = Number(message.upscale.scale ?? 1).toFixed(2).replace(/\.00$/, '')
         const method = message.upscale.method === 'ai' ? 'AI Super Resolution' : 'high-quality fallback'
         const suffix = [restoreLabel, faceLabel].filter(Boolean).map((label) => ` · ${label}`).join('')
-        status.textContent = `${method} ${scale}× active — ${message.upscale.width} × ${message.upscale.height}${suffix}.`
+        status.textContent = `${method} ${scale}× ready — ${message.upscale.width} × ${message.upscale.height}${suffix}. Click Generate crop to update outputs.`
       } else if (restoreLabel || faceLabel) {
-        status.textContent = `${[restoreLabel, faceLabel].filter(Boolean).join(' · ')} applied to the current image.`
+        status.textContent = `${[restoreLabel, faceLabel].filter(Boolean).join(' · ')} ready. Click Generate crop to update outputs.`
       } else if (message.auto) {
-        status.textContent = 'Auto Enhance applied to the current image.'
+        status.textContent = 'Auto Enhance ready — click Generate crop to update outputs.'
       } else {
         status.textContent = Object.values(settings).some((value) => value !== 0 && value !== false)
-          ? 'Enhancement updated.'
+          ? 'Enhancement ready — click Generate crop to update outputs.'
           : 'Optional — crop can be generated without enhancement.'
       }
     }
-    if (message?.type === 'done' && !status.textContent?.startsWith('Auto Enhance') && !status.textContent?.includes('active —') && !status.textContent?.includes('Restoration') && !status.textContent?.includes('Face Enhance')) {
+    if (message?.type === 'done' && !status.textContent?.startsWith('Auto Enhance') && !status.textContent?.includes('ready —') && !status.textContent?.includes('Restoration') && !status.textContent?.includes('Face Enhance')) {
       status.textContent = 'Optional — crop can be generated without enhancement.'
     }
     if (message?.type === 'error' && String(message.message ?? '').toLowerCase().includes('enhanc')) {
