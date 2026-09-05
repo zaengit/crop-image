@@ -115,7 +115,14 @@ root.querySelectorAll<HTMLButtonElement>('[data-enhance-toggle]').forEach((butto
     const key = button.dataset.enhanceToggle as keyof EnhancementSettings
     ;(settings as unknown as Record<string, boolean>)[key] = !Boolean(settings[key])
     syncControls()
-    sendEnhancement(key === 'upscale2x' && settings.upscale2x ? 'Preparing AI super resolution…' : 'Applying enhancement…')
+    const aiRestore = (key === 'deblur' || key === 'restorePhoto') && Boolean(settings[key])
+    sendEnhancement(
+      key === 'upscale2x' && settings.upscale2x
+        ? 'Preparing AI super resolution…'
+        : aiRestore
+          ? 'Preparing AI restoration…'
+          : 'Applying enhancement…',
+    )
   })
 })
 
@@ -152,15 +159,24 @@ const TrackingWorker = new Proxy(NativeWorker, {
       if (message?.type === 'enhancement-settings') {
         settings = { ...settings, ...message.settings }
         syncControls()
+        const restoreLabel = message.restoration
+          ? message.restoration.method === 'ai'
+            ? 'AI Restoration'
+            : 'local restoration fallback'
+          : ''
+
         if (message.upscale) {
           const scale = Number(message.upscale.scale ?? 1).toFixed(2).replace(/\.00$/, '')
           const method = message.upscale.method === 'ai' ? 'AI Super Resolution' : 'high-quality fallback'
-          status.textContent = `${method} ${scale}× active — ${message.upscale.width} × ${message.upscale.height}.`
+          const suffix = restoreLabel ? ` · ${restoreLabel}` : ''
+          status.textContent = `${method} ${scale}× active — ${message.upscale.width} × ${message.upscale.height}${suffix}.`
+        } else if (restoreLabel) {
+          status.textContent = `${restoreLabel} applied to all generated sizes.`
         } else {
           status.textContent = message.auto ? 'Auto Enhance applied to all generated sizes.' : 'Enhancement updated.'
         }
       }
-      if (message?.type === 'done' && !status.textContent?.startsWith('Auto Enhance') && !status.textContent?.includes('active —')) {
+      if (message?.type === 'done' && !status.textContent?.startsWith('Auto Enhance') && !status.textContent?.includes('active —') && !status.textContent?.includes('Restoration')) {
         status.textContent = 'Enhancement is applied locally to all generated sizes.'
       }
       if (message?.type === 'error' && String(message.message ?? '').toLowerCase().includes('enhanc')) {
