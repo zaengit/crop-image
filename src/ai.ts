@@ -12,7 +12,9 @@ const MODEL_WIDTH = 320
 const MODEL_HEIGHT = 240
 const SCORE_THRESHOLD = 0.6
 const FALLBACK_SCORE_THRESHOLD = 0.48
-const OBJECT_SCORE_THRESHOLD = 0.3
+const OBJECT_SCORE_THRESHOLD = 0.2
+const GENERAL_OBJECT_SCORE_THRESHOLD = 0.3
+const PERSON_SCORE_THRESHOLD = 0.2
 const IOU_THRESHOLD = 0.3
 
 type OrtModule = typeof import('onnxruntime-web/wasm')
@@ -151,6 +153,7 @@ async function detectFaceRegions(rgba: Uint8ClampedArray, width: number, height:
       height: y2 - y1,
       confidence,
       kind: 'face',
+      label: 'face',
     }
 
     if (!fallback || confidence > fallback.confidence) fallback = region
@@ -167,14 +170,18 @@ async function detectObjectSubject(rgba: Uint8ClampedArray, width: number, heigh
   if (!canvas) return undefined
   const detector = await getObjectDetector()
   const result = detector.detect(canvas as never)
-  let best: { region: FocusRegion; rank: number } | undefined
+  let bestPerson: { region: FocusRegion; rank: number } | undefined
+  let bestObject: { region: FocusRegion; rank: number } | undefined
 
   for (const detection of result.detections ?? []) {
     const box = detection.boundingBox
     const category = detection.categories?.[0]
     if (!box || !category) continue
     const confidence = category.score ?? 0
-    if (confidence < OBJECT_SCORE_THRESHOLD) continue
+    const label = (category.categoryName || category.displayName || '').trim().toLowerCase()
+    const isPerson = label === 'person'
+    const threshold = isPerson ? PERSON_SCORE_THRESHOLD : GENERAL_OBJECT_SCORE_THRESHOLD
+    if (confidence < threshold) continue
 
     const x = Math.max(0, Math.min(1, box.originX / width))
     const y = Math.max(0, Math.min(1, box.originY / height))
@@ -186,7 +193,7 @@ async function detectObjectSubject(rgba: Uint8ClampedArray, width: number, heigh
     const centerX = x + boxWidth / 2
     const centerY = y + boxHeight / 2
     const centerDistance = Math.hypot(centerX - 0.5, centerY - 0.5)
-    const centerBias = Math.max(0.78, 1 - centerDistance * 0.22)
+    const centerBias = isPerson ? 1 : Math.max(0.78, 1 - centerDistance * 0.22)
     const rank = confidence * (0.4 + Math.sqrt(area)) * centerBias
     const region: FocusRegion = {
       x,
@@ -195,12 +202,17 @@ async function detectObjectSubject(rgba: Uint8ClampedArray, width: number, heigh
       height: boxHeight,
       confidence,
       kind: 'subject',
-      label: category.categoryName || category.displayName || undefined,
+      label: label || undefined,
     }
-    if (!best || rank > best.rank) best = { region, rank }
+
+    if (isPerson) {
+      if (!bestPerson || rank > bestPerson.rank) bestPerson = { region, rank }
+    } else if (!bestObject || rank > bestObject.rank) {
+      bestObject = { region, rank }
+    }
   }
 
-  return best?.region
+  return bestPerson?.region ?? bestObject?.region
 }
 
 export async function detectFaces(rgba: Uint8ClampedArray, width: number, height: number): Promise<FocusRegion[]> {
