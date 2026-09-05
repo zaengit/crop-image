@@ -1,9 +1,10 @@
-import * as ort from 'onnxruntime-web/wasm'
-
 const SCALE = 2
 const TILE = 128
 const OVERLAP = 8
-let sessionPromise: Promise<ort.InferenceSession> | undefined
+
+type OrtModule = typeof import('onnxruntime-web/wasm')
+let ortPromise: Promise<OrtModule> | undefined
+let sessionPromise: Promise<Awaited<ReturnType<OrtModule['InferenceSession']['create']>>> | undefined
 
 type CachedAiUpscale = AiUpscaleResult | (() => Promise<AiUpscaleResult>)
 const cachedUpscales = new WeakMap<Uint8ClampedArray, CachedAiUpscale>()
@@ -19,18 +20,26 @@ export function cacheAiUpscale(source: Uint8ClampedArray, result: CachedAiUpscal
   cachedUpscales.set(source, result)
 }
 
+function getOrt() {
+  ortPromise ??= import('onnxruntime-web/wasm')
+  return ortPromise
+}
+
 function clampByte(value: number) {
   return Math.max(0, Math.min(255, Math.round(value)))
 }
 
 async function getSession() {
   if (!sessionPromise) {
-    ort.env.wasm.numThreads = 1
-    const modelUrl = `${import.meta.env.BASE_URL}models/realesrgan_x2plus.onnx`
-    sessionPromise = ort.InferenceSession.create(modelUrl, {
-      executionProviders: ['wasm'],
-      graphOptimizationLevel: 'all',
-    }).catch((error) => {
+    sessionPromise = (async () => {
+      const ort = await getOrt()
+      ort.env.wasm.numThreads = 1
+      const modelUrl = `${import.meta.env.BASE_URL}models/realesrgan_x2plus.onnx`
+      return ort.InferenceSession.create(modelUrl, {
+        executionProviders: ['wasm'],
+        graphOptimizationLevel: 'all',
+      })
+    })().catch((error) => {
       sessionPromise = undefined
       throw error
     })
@@ -149,7 +158,7 @@ export async function aiUpscale2x(
     }
   }
 
-  const session = await getSession()
+  const [ort, session] = await Promise.all([getOrt(), getSession()])
   const destinationWidth = width * SCALE
   const destinationHeight = height * SCALE
   const destination = new Uint8ClampedArray(destinationWidth * destinationHeight * 4)

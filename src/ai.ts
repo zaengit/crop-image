@@ -1,5 +1,3 @@
-import * as ort from 'onnxruntime-web/wasm'
-
 export type FocusRegion = {
   x: number
   y: number
@@ -13,15 +11,29 @@ const MODEL_WIDTH = 320
 const MODEL_HEIGHT = 240
 const SCORE_THRESHOLD = 0.72
 const IOU_THRESHOLD = 0.3
-let sessionPromise: Promise<ort.InferenceSession> | undefined
 
-function getSession() {
+type OrtModule = typeof import('onnxruntime-web/wasm')
+let ortPromise: Promise<OrtModule> | undefined
+let sessionPromise: Promise<Awaited<ReturnType<OrtModule['InferenceSession']['create']>>> | undefined
+
+function getOrt() {
+  ortPromise ??= import('onnxruntime-web/wasm')
+  return ortPromise
+}
+
+async function getSession() {
   if (!sessionPromise) {
-    ort.env.wasm.numThreads = 1
-    const modelUrl = `${import.meta.env.BASE_URL}models/version-RFB-320.onnx`
-    sessionPromise = ort.InferenceSession.create(modelUrl, {
-      executionProviders: ['wasm'],
-      graphOptimizationLevel: 'all'
+    sessionPromise = (async () => {
+      const ort = await getOrt()
+      ort.env.wasm.numThreads = 1
+      const modelUrl = `${import.meta.env.BASE_URL}models/version-RFB-320.onnx`
+      return ort.InferenceSession.create(modelUrl, {
+        executionProviders: ['wasm'],
+        graphOptimizationLevel: 'all'
+      })
+    })().catch((error) => {
+      sessionPromise = undefined
+      throw error
     })
   }
   return sessionPromise
@@ -69,7 +81,7 @@ export async function detectFaces(rgba: Uint8ClampedArray, width: number, height
     input[plane * 2 + i] = (pixels[p + 2] - 127) / 128
   }
 
-  const session = await getSession()
+  const [ort, session] = await Promise.all([getOrt(), getSession()])
   const outputs = await session.run({ [session.inputNames[0]]: new ort.Tensor('float32', input, [1, 3, MODEL_HEIGHT, MODEL_WIDTH]) })
   const tensors = Object.values(outputs)
   const scoresTensor = tensors.find((t) => t.dims.at(-1) === 2 && t.dims.length >= 2)

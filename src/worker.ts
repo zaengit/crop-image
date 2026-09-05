@@ -1,6 +1,5 @@
 /// <reference lib="webworker" />
 
-import { FilesetResolver, ImageSegmenter } from '@mediapipe/tasks-vision'
 import initWasm, { smart_crop_png } from './wasm/pkg/crop_image_wasm.js'
 import { detectFaces, type FocusRegion } from './ai'
 import { aiEnhanceFaces } from './ai-face-enhance'
@@ -9,6 +8,8 @@ import { aiUpscale2x } from './ai-upscale'
 import { PASSPORT_PRESETS, SOCIAL_PRESETS, type ImagePreset } from './presets'
 import { autoEnhancement, DEFAULT_ENHANCEMENT, enhanceRgba, type EnhancementSettings } from './enhance'
 
+type MediaPipeModule = typeof import('@mediapipe/tasks-vision')
+type Segmenter = Awaited<ReturnType<MediaPipeModule['ImageSegmenter']['createFromOptions']>>
 type OutputFormat = 'png' | 'jpeg' | 'webp'
 type Mode = { kind: 'focus'; x: number; y: number } | { kind: 'auto' }
 
@@ -35,7 +36,7 @@ const MAX_UPSCALE_PIXELS = 24_000_000
 const MAX_UPSCALE_EDGE = 8192
 
 let wasmReady: Promise<unknown> | undefined
-let segmenterReady: Promise<ImageSegmenter> | undefined
+let segmenterReady: Promise<Segmenter> | undefined
 let segmenterCanvas: OffscreenCanvas | undefined
 let sourceRgba: Uint8ClampedArray | undefined
 let sourceWidth = 0
@@ -57,6 +58,7 @@ function ensureWasm() { wasmReady ??= initWasm(); return wasmReady }
 function ensureSegmenter() {
   segmenterReady ??= (async () => {
     self.postMessage({ type: 'status', message: 'Loading local background remover…' })
+    const { FilesetResolver, ImageSegmenter } = await import('@mediapipe/tasks-vision')
     const wasmPath = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.0.1/wasm'
     const resolveVision = FilesetResolver.forVisionTasks as unknown as (path: string, useModuleLoader?: boolean) => Promise<{ wasmLoaderPath: string; [key: string]: unknown }>
     const fileset = await resolveVision(wasmPath, true)
