@@ -41,7 +41,7 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm install
 
-      - name: Fetch UltraFace model
+      - name: Fetch and verify AI models
         run: npm run model:fetch
 
       - name: Rust tests
