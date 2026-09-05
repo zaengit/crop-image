@@ -6,6 +6,7 @@ export type FaceRegion = {
   width: number
   height: number
   confidence?: number
+  kind?: 'face' | 'subject'
 }
 
 export type FaceEnhanceResult = {
@@ -98,9 +99,11 @@ export async function aiEnhanceFaces(
   const imagePixels = width * height
   const maxFaces = imagePixels > 8_000_000 ? 4 : 6
   const selected = [...faces]
-    .filter((face) => face.width > 0.025 && face.height > 0.025)
+    .filter((face) => face.kind !== 'subject' && face.width > 0.025 && face.height > 0.025)
     .sort((a, b) => (b.confidence ?? 0) - (a.confidence ?? 0))
     .slice(0, maxFaces)
+
+  if (!selected.length) return { rgba: output, faces: 0 }
 
   let processed = 0
   for (const face of selected) {
@@ -119,7 +122,6 @@ export async function aiEnhanceFaces(
     const cropWidth = Math.max(1, x1 - x0)
     const cropHeight = Math.max(1, y1 - y0)
 
-    // Tiny faces do not contain enough information for restoration to help.
     if (cropWidth < 32 || cropHeight < 32) continue
 
     const crop = extractRegion(output, width, x0, y0, cropWidth, cropHeight)
