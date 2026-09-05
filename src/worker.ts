@@ -3,11 +3,20 @@
 import { FilesetResolver, ImageSegmenter } from '@mediapipe/tasks-vision'
 import initWasm, { smart_crop_png } from './wasm/pkg/crop_image_wasm.js'
 import { detectFaces, type FocusRegion } from './ai'
+import { aiUpscale2x } from './ai-upscale'
 import { PASSPORT_PRESETS, SOCIAL_PRESETS, type ImagePreset } from './presets'
 import { autoEnhancement, DEFAULT_ENHANCEMENT, enhanceRgba, type EnhancementSettings } from './enhance'
 
 type OutputFormat = 'png' | 'jpeg' | 'webp'
 type Mode = { kind: 'focus'; x: number; y: number } | { kind: 'auto' }
+
+type UpscaleInfo = {
+  scale: number
+  width: number
+  height: number
+  method: 'ai' | 'resample'
+  fallback?: string
+}
 
 const MAX_UPSCALE_PIXELS = 24_000_000
 const MAX_UPSCALE_EDGE = 8192
@@ -105,23 +114,53 @@ function upscaleDimensions(width: number, height: number) {
   }
 }
 
-async function upscaleRgba(source: Uint8ClampedArray, width: number, height: number) {
-  const target = upscaleDimensions(width, height)
-  if (target.scale <= 1.001) return { rgba: new Uint8ClampedArray(source), width, height, scale: 1 }
-
+async function resampleRgba(source: Uint8ClampedArray, width: number, height: number, targetWidth: number, targetHeight: number) {
+  if (targetWidth === width && targetHeight === height) return new Uint8ClampedArray(source)
   const sourceCanvas = new OffscreenCanvas(width, height)
   const sourceCtx = sourceCanvas.getContext('2d')
   if (!sourceCtx) throw new Error('Unable to create upscale source canvas')
   sourceCtx.putImageData(new ImageData(new Uint8ClampedArray(source), width, height), 0, 0)
 
-  const targetCanvas = new OffscreenCanvas(target.width, target.height)
+  const targetCanvas = new OffscreenCanvas(targetWidth, targetHeight)
   const targetCtx = targetCanvas.getContext('2d', { willReadFrequently: true })
   if (!targetCtx) throw new Error('Unable to create upscale output canvas')
   targetCtx.imageSmoothingEnabled = true
   targetCtx.imageSmoothingQuality = 'high'
-  targetCtx.drawImage(sourceCanvas, 0, 0, width, height, 0, 0, target.width, target.height)
-  const image = targetCtx.getImageData(0, 0, target.width, target.height)
-  return { rgba: image.data, width: target.width, height: target.height, scale: target.scale }
+  targetCtx.drawImage(sourceCanvas, 0, 0, width, height, 0, 0, targetWidth, targetHeight)
+  return targetCtx.getImageData(0, 0, targetWidth, targetHeight).data
+}
+
+async function upscaleRgba(source: Uint8ClampedArray, width: number, height: number) {
+  const target = upscaleDimensions(width, height)
+  if (target.scale <= 1.001) {
+    return { rgba: new Uint8ClampedArray(source), width, height, scale: 1, method: 'resample' as const }
+  }
+
+  if (target.scale >= 1.999) {
+    try {
+      self.postMessage({ type: 'status', message: 'Loading AI super-resolution model…' })
+      const ai = await aiUpscale2x(source, width, height, (done, total) => {
+        self.postMessage({ type: 'status', message: `AI upscaling ${done} / ${total} tiles…` })
+      })
+      return { rgba: ai.rgba, width: ai.width, height: ai.height, scale: 2, method: 'ai' as const }
+    } catch (error) {
+      console.warn('AI super resolution unavailable; using high-quality resampling.', error)
+      self.postMessage({ type: 'status', message: 'AI model unavailable. Using high-quality 2× fallback…' })
+      const rgba = await resampleRgba(source, width, height, target.width, target.height)
+      return {
+        rgba,
+        width: target.width,
+        height: target.height,
+        scale: target.scale,
+        method: 'resample' as const,
+        fallback: error instanceof Error ? error.message : String(error),
+      }
+    }
+  }
+
+  self.postMessage({ type: 'status', message: 'Image is large. Using memory-safe upscale…' })
+  const rgba = await resampleRgba(source, width, height, target.width, target.height)
+  return { rgba, width: target.width, height: target.height, scale: target.scale, method: 'resample' as const }
 }
 
 async function ensurePersonMask() {
@@ -218,15 +257,20 @@ async function rebuildEnhancedImage(settings: EnhancementSettings) {
   let pixels = enhanceRgba(sourceRgba, sourceWidth, sourceHeight, settings, cachedFocus)
   let width = sourceWidth
   let height = sourceHeight
-  let upscale: { scale: number; width: number; height: number } | undefined
+  let upscale: UpscaleInfo | undefined
 
   if (settings.upscale2x) {
-    self.postMessage({ type: 'status', message: 'Upscaling working image locally…' })
     const scaled = await upscaleRgba(pixels, width, height)
     pixels = scaled.rgba
     width = scaled.width
     height = scaled.height
-    upscale = { scale: scaled.scale, width, height }
+    upscale = {
+      scale: scaled.scale,
+      width,
+      height,
+      method: scaled.method,
+      ...(scaled.fallback ? { fallback: scaled.fallback } : {}),
+    }
   }
 
   cachedRgba = pixels
