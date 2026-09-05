@@ -48,8 +48,13 @@ export function createCropWorker(url: URL) {
     const next = queue.shift()!
 
     if (next.completion) inFlight = next
-    if (next.transferOrOptions === undefined) nativePostMessage(next.message)
-    else nativePostMessage(next.message, next.transferOrOptions)
+    if (next.transferOrOptions === undefined) {
+      nativePostMessage(next.message)
+    } else if (Array.isArray(next.transferOrOptions)) {
+      nativePostMessage(next.message, { transfer: next.transferOrOptions })
+    } else {
+      nativePostMessage(next.message, next.transferOrOptions)
+    }
 
     if (!next.completion) queueMicrotask(dispatchNext)
   }
