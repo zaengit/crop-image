@@ -6,9 +6,10 @@ import { aiEnhanceFaces } from './ai-face-enhance'
 import { aiRestoreImage } from './ai-restore'
 import { aiUpscale2x } from './ai-upscale'
 import { hasGlobalAdjustments, runGlobalAdjustmentsWebGpu } from './gpu-adjustments'
+import { runDetailWebGpu } from './gpu-detail'
 import { adaptiveLowLightAccelerated } from './low-light'
 import { PASSPORT_PRESETS, SOCIAL_PRESETS, type ImagePreset } from './presets'
-import { autoEnhancement, DEFAULT_ENHANCEMENT, enhanceRgba, type EnhancementSettings } from './enhance'
+import { autoEnhancement, DEFAULT_ENHANCEMENT, detailStrengths, enhanceRgba, type EnhancementSettings } from './enhance'
 
 type MediaPipeModule = typeof import('@mediapipe/tasks-vision')
 type Segmenter = Awaited<ReturnType<MediaPipeModule['ImageSegmenter']['createFromOptions']>>
@@ -332,7 +333,22 @@ async function buildEnhancedImage(settings: EnhancementSettings): Promise<Enhanc
 
   const useAiRestore = effectiveSettings.denoise >= 20 || effectiveSettings.deblur || effectiveSettings.restorePhoto
   const localSettings = useAiRestore ? { ...effectiveSettings, denoise: 0, deblur: false } : effectiveSettings
-  let pixels = enhanceRgba(enhancementSource, sourceWidth, sourceHeight, localSettings, cachedFocus)
+  const detail = detailStrengths(localSettings)
+  let pixels: Uint8ClampedArray
+
+  if ((detail.denoise > 0 || detail.sharpen > 0) && !localSettings.faceEnhance) {
+    const toned = enhanceRgba(enhancementSource, sourceWidth, sourceHeight, localSettings, cachedFocus, { skipDetail: true })
+    try {
+      self.postMessage({ type: 'status', message: 'Applying GPU detail enhancement…' })
+      pixels = await runDetailWebGpu(toned, sourceWidth, sourceHeight, detail.denoise, detail.sharpen)
+    } catch (error) {
+      console.warn('WebGPU detail enhancement unavailable; using CPU fallback.', error)
+      pixels = enhanceRgba(enhancementSource, sourceWidth, sourceHeight, localSettings, cachedFocus)
+    }
+  } else {
+    pixels = enhanceRgba(enhancementSource, sourceWidth, sourceHeight, localSettings, cachedFocus)
+  }
+
   let width = sourceWidth
   let height = sourceHeight
   let restoration: RestorationInfo | undefined
