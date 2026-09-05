@@ -1,6 +1,7 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react'
 import { useCropEngine, type Generated } from './use-crop-engine'
 import type { PresetGroup } from './presets'
+import type { EnhancementSettings } from './enhance'
 import { EnhancementPanel, enhancementPreviewFilter } from './EnhancementPanel'
 import { StoreAssetsPanel } from './StoreAssetsPanel'
 import { FocusEditor } from './components/FocusEditor'
@@ -14,6 +15,7 @@ export function App() {
   const engine = useCropEngine()
   const [menu, setMenu] = useState<PresetGroup>('social')
   const [comparing, setComparing] = useState(false)
+  const [previewEnhancement, setPreviewEnhancement] = useState<EnhancementSettings>({ ...engine.enhancement })
   const [customWidth, setCustomWidth] = useState(1080)
   const [customHeight, setCustomHeight] = useState(1080)
   const [lockRatio, setLockRatio] = useState(false)
@@ -24,6 +26,10 @@ export function App() {
     document.documentElement.dataset.appReady = 'true'
     return () => { delete document.documentElement.dataset.appReady }
   }, [])
+
+  useEffect(() => {
+    setPreviewEnhancement({ ...engine.enhancement })
+  }, [engine.enhancement])
 
   const visibleResults = engine.generated.filter((item: Generated) => item.preset.group === menu)
 
@@ -65,7 +71,7 @@ export function App() {
     if (checked) setLockedRatio(customWidth / Math.max(1, customHeight))
   }
 
-  const previewFilter = enhancementPreviewFilter(engine.enhancement, comparing)
+  const previewFilter = enhancementPreviewFilter(previewEnhancement, comparing)
 
   return (
     <main className="app-shell min-h-screen bg-[#f4f4f2] px-4 py-4 text-neutral-950 sm:px-6 sm:py-6 lg:px-8">
@@ -90,6 +96,7 @@ export function App() {
           visible={engine.hasImage}
           settings={engine.enhancement}
           status={engine.enhancementStatus}
+          onPreviewChange={setPreviewEnhancement}
           onApply={engine.applyEnhancement}
           onAuto={engine.autoEnhance}
           onReset={engine.resetEnhancement}
