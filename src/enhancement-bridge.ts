@@ -154,31 +154,16 @@ compare.addEventListener('pointerleave', endCompare)
 compare.addEventListener('keydown', (event) => { if (event.key === ' ' || event.key === 'Enter') beginCompare() })
 compare.addEventListener('keyup', endCompare)
 
-let trackedCropWorker: Worker | undefined
-
 function bindCropWorker(worker: Worker) {
-  if (trackedCropWorker === worker) return
-  trackedCropWorker = worker
+  if (latestWorker === worker) return
   latestWorker = worker
   root.hidden = false
-
-  const nativeTerminate = worker.terminate.bind(worker)
-  worker.terminate = () => {
-    nativeTerminate()
-    if (trackedCropWorker === worker) {
-      trackedCropWorker = undefined
-      latestWorker = undefined
-      applyingPersistedSettings = false
-    }
-  }
 
   worker.addEventListener('message', (event) => {
     const message = event.data
     if (message?.type === 'enhancement-settings') {
       const incoming = { ...DEFAULT_ENHANCEMENT, ...message.settings } as EnhancementSettings
 
-      // Every freshly-created crop worker starts at defaults. Keep the user's
-      // global settings across batch-image switches and apply them to the new worker.
       if (!message.auto && isDefaultSettings(incoming) && !isDefaultSettings(settings) && !applyingPersistedSettings) {
         applyingPersistedSettings = true
         status.textContent = 'Applying global enhancement to this image…'
@@ -219,9 +204,18 @@ function bindCropWorker(worker: Worker) {
       status.textContent = `Enhancement error: ${message.message}`
     }
   })
+
+  const nativeTerminate = worker.terminate.bind(worker)
+  worker.terminate = () => {
+    nativeTerminate()
+    if (latestWorker === worker) {
+      latestWorker = undefined
+      applyingPersistedSettings = false
+    }
+  }
 }
 
-function isCropLoadMessage(message: unknown): message is { type: 'load'; rgba: ArrayBuffer; width: number; height: number } {
+function isCropLoadMessage(message: unknown) {
   if (!message || typeof message !== 'object') return false
   const candidate = message as Record<string, unknown>
   return candidate.type === 'load'
@@ -240,6 +234,7 @@ const callNativePostMessage = nativePostMessage.call.bind(nativePostMessage) as 
 ) => void
 
 Worker.prototype.postMessage = function (
+  this: Worker,
   message: unknown,
   transferOrOptions?: Transferable[] | StructuredSerializeOptions,
 ) {
