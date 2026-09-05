@@ -1,5 +1,6 @@
 import './batch-upload.css'
 import './enhancement-bridge'
+import './store-global-enhance'
 
 type BatchItem = {
   id: string
