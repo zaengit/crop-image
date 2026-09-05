@@ -11,6 +11,9 @@ declare const ReactDOM: {
 }
 
 declare namespace JSX {
+  interface IntrinsicAttributes {
+    key?: string | number
+  }
   interface IntrinsicElements {
     [elementName: string]: any
   }
