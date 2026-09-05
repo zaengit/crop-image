@@ -22,6 +22,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -39,13 +40,13 @@ jobs:
           version: v0.13.1
 
       - name: Install JavaScript dependencies
-        run: npm install
+        run: npm ci
 
       - name: Fetch and verify AI models
         run: npm run model:fetch
 
       - name: Rust tests
-        run: cargo test --manifest-path crates/crop-image-wasm/Cargo.toml
+        run: cargo test --locked --manifest-path crates/crop-image-wasm/Cargo.toml
 
       - name: Build WASM bindings
         run: npm run wasm:build
@@ -57,9 +58,9 @@ jobs:
         run: npm run build:web
 
       - name: Install Chromium for smoke test
-        run: npx -y playwright@1.55.0 install --with-deps chromium
+        run: npx playwright install --with-deps chromium
 
       - name: Production browser smoke test
         run: |
           npm run preview -- --host 127.0.0.1 --port 4173 > /tmp/crop-image-preview.log 2>&1 &
-          npx -y @playwright/test@1.55.0 test tests/smoke.spec.js --reporter=line
+          npx playwright test tests/smoke.spec.js --reporter=line
