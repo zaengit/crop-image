@@ -1,12 +1,12 @@
-import { getOrtRuntime } from './ai-runtime'
+import { createOrtSession, recreateOrtSessionWithWasm, type OrtRuntimeSession } from './ai-runtime'
 
 const SCALE = 2
 const TILE = 128
 const OVERLAP = 8
+const MODEL_URL = `${import.meta.env.BASE_URL}models/realesrgan_x2plus.onnx`
+const SESSION_OPTIONS = { graphOptimizationLevel: 'all' as const }
 
-type OrtModule = typeof import('onnxruntime-web/wasm')
-type OrtSession = Awaited<ReturnType<OrtModule['InferenceSession']['create']>>
-type RuntimeSession = { ort: OrtModule; session: OrtSession }
+type RuntimeSession = OrtRuntimeSession
 
 let sessionPromise: Promise<RuntimeSession> | undefined
 
@@ -30,19 +30,21 @@ function clampByte(value: number) {
 
 async function getSession() {
   if (!sessionPromise) {
-    sessionPromise = (async () => {
-      const runtime = await getOrtRuntime()
-      const modelUrl = `${import.meta.env.BASE_URL}models/realesrgan_x2plus.onnx`
-      const session = await runtime.ort.InferenceSession.create(modelUrl, {
-        executionProviders: [runtime.backend],
-        graphOptimizationLevel: 'all',
-      })
-      return { ort: runtime.ort, session }
-    })().catch((error) => {
+    sessionPromise = createOrtSession(MODEL_URL, SESSION_OPTIONS).catch((error) => {
       sessionPromise = undefined
       throw error
     })
   }
+  return sessionPromise
+}
+
+async function switchSessionToWasm(failed: RuntimeSession) {
+  if (failed.backend !== 'webgpu') throw new Error('WASM ONNX session failed during inference')
+  const fallbackPromise = recreateOrtSessionWithWasm(MODEL_URL, SESSION_OPTIONS)
+  sessionPromise = fallbackPromise.catch((error) => {
+    sessionPromise = undefined
+    throw error
+  })
   return sessionPromise
 }
 
@@ -137,6 +139,18 @@ function copyUpscaledAlpha(
   }
 }
 
+async function runTile(
+  runtime: RuntimeSession,
+  input: Float32Array,
+  tileWidth: number,
+  tileHeight: number,
+) {
+  const feeds = {
+    [runtime.session.inputNames[0]]: new runtime.ort.Tensor('float32', input, [1, 3, tileHeight, tileWidth]),
+  }
+  return runtime.session.run(feeds)
+}
+
 export async function aiUpscale2x(
   source: Uint8ClampedArray,
   width: number,
@@ -157,7 +171,7 @@ export async function aiUpscale2x(
     }
   }
 
-  const { ort, session } = await getSession()
+  let runtime = await getSession()
   const destinationWidth = width * SCALE
   const destinationHeight = height * SCALE
   const destination = new Uint8ClampedArray(destinationWidth * destinationHeight * 4)
@@ -179,11 +193,18 @@ export async function aiUpscale2x(
       const tileWidth = sourceRight - sourceX
       const tileHeight = sourceBottom - sourceY
       const input = extractTile(source, width, height, sourceX, sourceY, tileWidth, tileHeight)
-      const feeds = {
-        [session.inputNames[0]]: new ort.Tensor('float32', input, [1, 3, tileHeight, tileWidth]),
+
+      let outputs
+      try {
+        outputs = await runTile(runtime, input, tileWidth, tileHeight)
+      } catch (error) {
+        if (runtime.backend !== 'webgpu') throw error
+        console.warn('WebGPU ONNX inference failed; recreating Real-ESRGAN session with WASM.', error)
+        runtime = await switchSessionToWasm(runtime)
+        outputs = await runTile(runtime, input, tileWidth, tileHeight)
       }
-      const outputs = await session.run(feeds)
-      const tensor = outputs[session.outputNames[0]]
+
+      const tensor = outputs[runtime.session.outputNames[0]]
       if (!tensor || tensor.dims.length !== 4) throw new Error('Unexpected Real-ESRGAN output shape')
       const outputHeight = Number(tensor.dims[2])
       const outputWidth = Number(tensor.dims[3])
