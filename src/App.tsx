@@ -4,6 +4,7 @@ import type { PresetGroup } from './presets'
 import { EnhancementPanel, enhancementPreviewFilter } from './EnhancementPanel'
 import { StoreAssetsPanel } from './StoreAssetsPanel'
 import { FocusEditor } from './components/FocusEditor'
+import { ColorPicker } from './components/ColorPicker'
 import { OutputSettings } from './components/OutputSettings'
 import { ResultGrid } from './components/ResultGrid'
 import { SizeTabs } from './components/SizeTabs'
@@ -176,16 +177,19 @@ export function App() {
                         {label}
                       </button>
                     ))}
-                    <label className="rounded-full border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-700">
-                      <span>Custom </span>
-                      <input
-                        id="passport-background-color"
-                        type="color"
-                        value={engine.background.startsWith('#') ? engine.background : '#e5e7eb'}
-                        aria-label="Custom passport background color"
-                        onChange={(event) => engine.setBackground(event.currentTarget.value)}
-                      />
-                    </label>
+                    <ColorPicker
+                      id="passport-background-color"
+                      label="Custom background"
+                      value={engine.background}
+                      fallback="#e5e7eb"
+                      presets={[
+                        { label: 'White', value: '#ffffff' },
+                        { label: 'Black', value: '#000000' },
+                        { label: 'Red', value: '#d71920' },
+                        { label: 'Blue', value: '#1769d2' },
+                      ]}
+                      onChange={(value) => engine.setBackground(value)}
+                    />
                   </div>
                   <small id="background-status" className="mt-2 block text-sm text-neutral-600" aria-live="polite">{engine.backgroundStatus}</small>
                 </div>
