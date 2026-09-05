@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import { Zip, ZipDeflate, strToU8 } from 'fflate'
 import { createCropWorker } from './worker-channel'
 import type { ImagePreset, PresetGroup } from './presets'
@@ -172,31 +173,31 @@ async function createStreamingZip(entries: Array<{ path: string; blob?: Blob; by
 }
 
 export function useCropEngine() {
-  const [status, setStatus] = React.useState('Ready')
-  const [generated, setGenerated] = React.useState<Generated[]>([])
-  const [sourceUrl, setSourceUrl] = React.useState<string | undefined>(undefined)
-  const [workerReady, setWorkerReady] = React.useState(false)
-  const [busy, setBusy] = React.useState(false)
-  const [format, setFormatState] = React.useState<OutputFormat>('jpeg')
-  const [quality, setQualityState] = React.useState(90)
-  const [focus, setFocus] = React.useState({ x: 0.5, y: 0.5 })
-  const [background, setBackgroundState] = React.useState('original')
-  const [backgroundStatus, setBackgroundStatus] = React.useState('')
-  const [enhancement, setEnhancementState] = React.useState<EnhancementSettings>({ ...DEFAULT_ENHANCEMENT })
-  const [enhancementStatus, setEnhancementStatus] = React.useState('Optional — crop can be generated without enhancement.')
+  const [status, setStatus] = useState('Ready')
+  const [generated, setGenerated] = useState<Generated[]>([])
+  const [sourceUrl, setSourceUrl] = useState<string | undefined>(undefined)
+  const [workerReady, setWorkerReady] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [format, setFormatState] = useState<OutputFormat>('jpeg')
+  const [quality, setQualityState] = useState(90)
+  const [focus, setFocus] = useState({ x: 0.5, y: 0.5 })
+  const [background, setBackgroundState] = useState('original')
+  const [backgroundStatus, setBackgroundStatus] = useState('')
+  const [enhancement, setEnhancementState] = useState<EnhancementSettings>({ ...DEFAULT_ENHANCEMENT })
+  const [enhancementStatus, setEnhancementStatus] = useState('Optional — crop can be generated without enhancement.')
 
-  const workerRef = React.useRef<Worker | undefined>(undefined)
-  const generatedRef = React.useRef<Generated[]>([])
-  const sourceUrlRef = React.useRef<string | undefined>(undefined)
-  const processRevision = React.useRef(0)
-  const customSequence = React.useRef(0)
-  const currentFileName = React.useRef('crop-image')
-  const focusTimer = React.useRef<number | undefined>(undefined)
-  const pendingFocus = React.useRef<{ x: number; y: number } | undefined>(undefined)
-  const formatRef = React.useRef<OutputFormat>('jpeg')
-  const qualityRef = React.useRef(90)
-  const backgroundRef = React.useRef('original')
-  const enhancementRef = React.useRef<EnhancementSettings>({ ...DEFAULT_ENHANCEMENT })
+  const workerRef = useRef<Worker | undefined>(undefined)
+  const generatedRef = useRef<Generated[]>([])
+  const sourceUrlRef = useRef<string | undefined>(undefined)
+  const processRevision = useRef(0)
+  const customSequence = useRef(0)
+  const currentFileName = useRef('crop-image')
+  const focusTimer = useRef<number | undefined>(undefined)
+  const pendingFocus = useRef<{ x: number; y: number } | undefined>(undefined)
+  const formatRef = useRef<OutputFormat>('jpeg')
+  const qualityRef = useRef(90)
+  const backgroundRef = useRef('original')
+  const enhancementRef = useRef<EnhancementSettings>({ ...DEFAULT_ENHANCEMENT })
 
   const replaceGenerated = (next: Generated[]) => {
     generatedRef.current = next
@@ -522,7 +523,7 @@ export function useCropEngine() {
     }
   }
 
-  React.useEffect(() => () => {
+  useEffect(() => () => {
     processRevision.current += 1
     if (focusTimer.current) window.clearTimeout(focusTimer.current)
     workerRef.current?.terminate()

@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import {
   createIconZip,
   createScreenshotSource,
@@ -40,26 +41,26 @@ function ResultCard({ item, icon = false }: { item: StoreOutput | IconOutput; ic
 }
 
 export function StoreAssetsPanel() {
-  const [view, setView] = React.useState<'screenshots' | 'icon'>('screenshots')
-  const [sources, setSources] = React.useState<ScreenshotSource[]>([])
-  const [outputs, setOutputs] = React.useState<StoreOutput[]>([])
-  const [screenshotStatus, setScreenshotStatus] = React.useState('No screenshots added.')
-  const [screenshotBusy, setScreenshotBusy] = React.useState(false)
-  const [platform, setPlatform] = React.useState<StorePlatform>('both')
-  const [orientation, setOrientation] = React.useState<StoreOrientation>('portrait')
-  const [resizeMode, setResizeMode] = React.useState<ResizeMode>('fit')
-  const [format, setFormat] = React.useState<StoreFormat>('png')
-  const [background, setBackground] = React.useState('auto')
-  const [categories, setCategories] = React.useState<StorePresetCategory[]>([...ALL_CATEGORIES])
-  const [iconSource, setIconSource] = React.useState<ScreenshotSource | undefined>(undefined)
-  const [iconOutputs, setIconOutputs] = React.useState<IconOutput[]>([])
-  const [iconStatus, setIconStatus] = React.useState('Choose an icon to begin.')
-  const [iconBusy, setIconBusy] = React.useState(false)
-  const [iconFitMode, setIconFitMode] = React.useState<IconFitMode>('fit')
-  const [iconBackground, setIconBackground] = React.useState('transparent')
-  const screenshotInputRef = React.useRef<any>(null)
-  const iconInputRef = React.useRef<any>(null)
-  const draggedId = React.useRef<string | undefined>(undefined)
+  const [view, setView] = useState<'screenshots' | 'icon'>('screenshots')
+  const [sources, setSources] = useState<ScreenshotSource[]>([])
+  const [outputs, setOutputs] = useState<StoreOutput[]>([])
+  const [screenshotStatus, setScreenshotStatus] = useState('No screenshots added.')
+  const [screenshotBusy, setScreenshotBusy] = useState(false)
+  const [platform, setPlatform] = useState<StorePlatform>('both')
+  const [orientation, setOrientation] = useState<StoreOrientation>('portrait')
+  const [resizeMode, setResizeMode] = useState<ResizeMode>('fit')
+  const [format, setFormat] = useState<StoreFormat>('png')
+  const [background, setBackground] = useState('auto')
+  const [categories, setCategories] = useState<StorePresetCategory[]>([...ALL_CATEGORIES])
+  const [iconSource, setIconSource] = useState<ScreenshotSource | undefined>(undefined)
+  const [iconOutputs, setIconOutputs] = useState<IconOutput[]>([])
+  const [iconStatus, setIconStatus] = useState('Choose an icon to begin.')
+  const [iconBusy, setIconBusy] = useState(false)
+  const [iconFitMode, setIconFitMode] = useState<IconFitMode>('fit')
+  const [iconBackground, setIconBackground] = useState('transparent')
+  const screenshotInputRef = useRef<any>(null)
+  const iconInputRef = useRef<any>(null)
+  const draggedId = useRef<string | undefined>(undefined)
 
   const invalidateScreenshots = (message = 'Settings changed — generate screenshot assets when ready.') => {
     revokeOutputs(outputs)
@@ -211,7 +212,7 @@ export function StoreAssetsPanel() {
     }
   }
 
-  React.useEffect(() => () => {
+  useEffect(() => () => {
     for (const item of sources) URL.revokeObjectURL(item.url)
     if (iconSource) URL.revokeObjectURL(iconSource.url)
     revokeOutputs(outputs)
