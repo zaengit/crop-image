@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "1.0.1",
-    "fflate": "0.8.2",
+    "fflate": "0.8.3",
     "onnxruntime-web": "1.22.0"
   },
   "devDependencies": {
