@@ -152,8 +152,8 @@ export async function runEnhancementPipelineWebGpu(
   const storageUsage = usage.STORAGE | usage.COPY_DST | usage.COPY_SRC
   const a = device.createBuffer({ size: byteLength, usage: storageUsage })
   const b = device.createBuffer({ size: byteLength, usage: storageUsage })
-  const params = device.createBuffer({ size: 48, usage: usage.UNIFORM | usage.COPY_DST })
   const readback = device.createBuffer({ size: byteLength, usage: usage.COPY_DST | usage.MAP_READ })
+  const paramBuffers: GpuBuffer[] = []
   let mappedReadback: GpuBuffer | undefined
 
   try {
@@ -163,6 +163,8 @@ export async function runEnhancementPipelineWebGpu(
     let output = b
 
     const runPass = (mode: number, values: number[]) => {
+      const params = device.createBuffer({ size: 48, usage: usage.UNIFORM | usage.COPY_DST })
+      paramBuffers.push(params)
       const bytes = new ArrayBuffer(48)
       const view = new DataView(bytes)
       view.setUint32(0, width, true)
@@ -184,7 +186,9 @@ export async function runEnhancementPipelineWebGpu(
       pass.setBindGroup(0, bindGroup)
       pass.dispatchWorkgroups(Math.ceil(pixelCount / 256))
       pass.end()
-      const swap = input; input = output; output = swap
+      const swap = input
+      input = output
+      output = swap
     }
 
     if (settings.lowLight) {
@@ -221,6 +225,9 @@ export async function runEnhancementPipelineWebGpu(
     return result
   } finally {
     if (mappedReadback) mappedReadback.unmap()
-    a.destroy(); b.destroy(); params.destroy(); readback.destroy()
+    a.destroy()
+    b.destroy()
+    for (const buffer of paramBuffers) buffer.destroy()
+    readback.destroy()
   }
 }
