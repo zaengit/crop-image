@@ -1,5 +1,6 @@
 import './batch-upload.css'
 import './enhancement-bridge'
+import './enhance-flow-gate'
 import './store-global-enhance'
 
 const fileInput = document.querySelector<HTMLInputElement>('#file')
