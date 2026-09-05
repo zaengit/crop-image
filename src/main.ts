@@ -729,3 +729,4 @@ selectBackground('original')
 setGenerateBusy(false)
 downloadAll.disabled = true
 initStoreAssets()
+document.documentElement.dataset.appReady = 'true'
