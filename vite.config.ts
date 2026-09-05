@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite'
 
-export default defineConfig(({ command }) => ({
-  base: command === 'build' ? '/crop-image/' : '/',
+export default defineConfig(({ command, isPreview }) => ({
+  base: command === 'build' || isPreview ? '/crop-image/' : '/',
   build: {
     target: 'es2022',
   },
