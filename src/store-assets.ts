@@ -1,4 +1,5 @@
 import { strToU8, zipSync } from 'fflate'
+import { createEnhancedStoreBitmap } from './store-global-enhance'
 
 type StorePlatform = 'google' | 'apple' | 'both'
 type StoreOrientation = 'portrait' | 'landscape' | 'both'
@@ -502,7 +503,7 @@ export function initStoreAssets() {
       const expected = screenshotSources.reduce((count, _source, index) => count + presets.filter((preset) => !preset.feature || index === 0).length, 0)
       for (let sourceIndex = 0; sourceIndex < screenshotSources.length; sourceIndex++) {
         const source = screenshotSources[sourceIndex]
-        const bitmap = await createImageBitmap(source.file)
+        const bitmap = await createEnhancedStoreBitmap(source.file)
         try {
           for (const preset of presets) {
             if (preset.feature && sourceIndex !== 0) continue
@@ -617,7 +618,7 @@ export function initStoreAssets() {
     revokeIconOutputs()
     generateIconsButton.disabled = true
     iconStatus.textContent = 'Generating app icons locally…'
-    const bitmap = await createImageBitmap(iconSource.file)
+    const bitmap = await createEnhancedStoreBitmap(iconSource.file)
     const mode = iconFitMode.value as IconFitMode
 
     try {
