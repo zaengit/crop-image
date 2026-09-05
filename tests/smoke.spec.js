@@ -12,6 +12,7 @@ const TEST_IMAGE = Buffer.from(`
 test('upload, focus change, and manual generate work in production build', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto('http://127.0.0.1:4173/crop-image/')
+  await expect(page.locator('html')).toHaveAttribute('data-app-ready', 'true', { timeout: 10_000 })
 
   await page.locator('#file').setInputFiles({
     name: 'smoke.svg',
