@@ -10,9 +10,23 @@ const TEST_IMAGE = Buffer.from(`
 `)
 
 test('upload, focus change, and manual generate work in production build', async ({ page }) => {
+  const browserErrors = []
+  page.on('pageerror', (error) => {
+    browserErrors.push(error.message)
+    console.error(`PAGEERROR: ${error.stack ?? error.message}`)
+  })
+  page.on('console', (message) => {
+    if (message.type() === 'error') console.error(`BROWSER CONSOLE: ${message.text()}`)
+  })
+
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto('http://127.0.0.1:4173/crop-image/')
-  await expect(page.locator('html')).toHaveAttribute('data-app-ready', 'true', { timeout: 10_000 })
+
+  try {
+    await expect(page.locator('html')).toHaveAttribute('data-app-ready', 'true', { timeout: 10_000 })
+  } catch (error) {
+    throw new Error(`App did not initialize. Browser errors: ${browserErrors.join(' | ') || 'none captured'}\n${error instanceof Error ? error.message : String(error)}`)
+  }
 
   await page.locator('#file').setInputFiles({
     name: 'smoke.svg',
@@ -41,4 +55,5 @@ test('upload, focus change, and manual generate work in production build', async
 
   await expect(page.locator('#grid .card')).toHaveCount(1, { timeout: 30_000 })
   await expect(page.locator('#status')).toContainText('Done', { timeout: 10_000 })
+  expect(browserErrors).toEqual([])
 })
