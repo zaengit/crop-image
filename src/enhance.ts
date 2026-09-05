@@ -190,7 +190,7 @@ export function enhanceRgba(
     out[i + 2] = clamp(b)
   }
 
-  let processed = out
+  let processed: Uint8ClampedArray<ArrayBufferLike> = out
   if (!options.skipDetail) {
     const detail = detailStrengths(settings)
     processed = applyDenoise(processed, width, height, detail.denoise)
