@@ -4,22 +4,22 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node scripts/copy-mediapipe-wasm.mjs && vite",
     "build": "npm run wasm:build && npm run build:web",
-    "build:web": "vite build",
+    "build:web": "node scripts/copy-mediapipe-wasm.mjs && vite build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "wasm:build": "wasm-pack build crates/crop-image-wasm --target web --out-dir ../../src/wasm/pkg --release",
     "model:fetch": "node scripts/fetch-model.mjs",
-    "setup": "npm run model:fetch && npm run wasm:build"
+    "setup": "npm run model:fetch && node scripts/copy-mediapipe-wasm.mjs && npm run wasm:build"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "1.0.1",
-    "fflate": "^0.8.2",
-    "onnxruntime-web": "^1.22.0"
+    "fflate": "0.8.2",
+    "onnxruntime-web": "1.22.0"
   },
   "devDependencies": {
-    "typescript": "^5.9.2",
-    "vite": "^7.1.0"
+    "typescript": "5.9.2",
+    "vite": "7.1.0"
   }
 }
