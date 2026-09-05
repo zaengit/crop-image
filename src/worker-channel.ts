@@ -6,8 +6,11 @@ function publish(worker: Worker | undefined) {
   for (const listener of listeners) listener(currentWorker)
 }
 
-export function createCropWorker(url: URL) {
-  const worker = new Worker(url, { type: 'module' })
+export function createCropWorker(_url?: URL) {
+  // Keep the Worker + new URL pattern together so Vite recognizes worker.ts
+  // as a module-worker entry and emits bundled JavaScript instead of copying
+  // the raw TypeScript source into dist.
+  const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })
   publish(worker)
 
   const nativeTerminate = worker.terminate.bind(worker)
