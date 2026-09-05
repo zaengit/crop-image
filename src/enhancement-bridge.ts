@@ -62,6 +62,10 @@ function isDefaultSettings(value: EnhancementSettings) {
     .every((key) => value[key] === DEFAULT_ENHANCEMENT[key])
 }
 
+function isAiHeavy(value: EnhancementSettings) {
+  return value.denoise >= 20 || value.deblur || value.restorePhoto || value.faceEnhance || value.upscale2x
+}
+
 function sendEnhancement(reason = 'Applying enhancement…') {
   applyPreview()
   if (!latestWorker) return
@@ -72,6 +76,10 @@ function sendEnhancement(reason = 'Applying enhancement…') {
 function schedule() {
   applyPreview()
   if (timer) window.clearTimeout(timer)
+  if (isAiHeavy(settings)) {
+    status.textContent = 'Release the slider to apply AI enhancement.'
+    return
+  }
   timer = window.setTimeout(() => sendEnhancement(), 140)
 }
 
@@ -114,6 +122,9 @@ root.querySelectorAll<HTMLInputElement>('[data-enhance-range]').forEach((input) 
     if (output) output.value = input.value
     schedule()
   })
+  input.addEventListener('change', () => {
+    if (isAiHeavy(settings)) sendEnhancement('Applying AI enhancement…')
+  })
 })
 
 root.querySelectorAll<HTMLButtonElement>('[data-enhance-toggle]').forEach((button) => {
@@ -125,9 +136,11 @@ root.querySelectorAll<HTMLButtonElement>('[data-enhance-toggle]').forEach((butto
     sendEnhancement(
       key === 'upscale2x' && settings.upscale2x
         ? 'Preparing AI super resolution…'
-        : aiRestore
-          ? 'Preparing AI restoration…'
-          : 'Applying enhancement…',
+        : key === 'faceEnhance' && settings.faceEnhance
+          ? 'Preparing AI face enhancement…'
+          : aiRestore
+            ? 'Preparing AI restoration…'
+            : 'Applying enhancement…',
     )
   })
 })
@@ -182,7 +195,9 @@ function bindCropWorker(worker: Worker) {
       const faceLabel = message.faceEnhance
         ? message.faceEnhance.method === 'ai'
           ? `AI Face Enhance (${message.faceEnhance.faces})`
-          : 'local face fallback'
+          : message.faceEnhance.faces === 0
+            ? 'No face detected'
+            : 'local face fallback'
         : ''
 
       if (message.upscale) {
@@ -224,8 +239,6 @@ function isCropLoadMessage(message: unknown) {
     && typeof candidate.height === 'number'
 }
 
-// Register the crop worker by its first application-level load message instead of
-// replacing window.Worker. Auxiliary workers created by ONNX/MediaPipe are untouched.
 const nativePostMessage = Worker.prototype.postMessage
 const callNativePostMessage = nativePostMessage.call.bind(nativePostMessage) as (
   worker: Worker,
