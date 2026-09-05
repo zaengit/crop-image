@@ -87,7 +87,37 @@ function copyOutputTile(
       destination[dp] = clampByte(output[op] * 255)
       destination[dp + 1] = clampByte(output[plane + op] * 255)
       destination[dp + 2] = clampByte(output[plane * 2 + op] * 255)
-      destination[dp + 3] = 255
+    }
+  }
+}
+
+function copyUpscaledAlpha(
+  source: Uint8ClampedArray,
+  width: number,
+  height: number,
+  destination: Uint8ClampedArray,
+  destinationWidth: number,
+  destinationHeight: number,
+) {
+  for (let y = 0; y < destinationHeight; y++) {
+    const sourceY = (y + 0.5) / SCALE - 0.5
+    const y0 = Math.max(0, Math.min(height - 1, Math.floor(sourceY)))
+    const y1 = Math.max(0, Math.min(height - 1, y0 + 1))
+    const fy = Math.max(0, Math.min(1, sourceY - y0))
+
+    for (let x = 0; x < destinationWidth; x++) {
+      const sourceX = (x + 0.5) / SCALE - 0.5
+      const x0 = Math.max(0, Math.min(width - 1, Math.floor(sourceX)))
+      const x1 = Math.max(0, Math.min(width - 1, x0 + 1))
+      const fx = Math.max(0, Math.min(1, sourceX - x0))
+
+      const a00 = source[(y0 * width + x0) * 4 + 3]
+      const a10 = source[(y0 * width + x1) * 4 + 3]
+      const a01 = source[(y1 * width + x0) * 4 + 3]
+      const a11 = source[(y1 * width + x1) * 4 + 3]
+      const top = a00 + (a10 - a00) * fx
+      const bottom = a01 + (a11 - a01) * fx
+      destination[(y * destinationWidth + x) * 4 + 3] = clampByte(top + (bottom - top) * fy)
     }
   }
 }
@@ -150,5 +180,6 @@ export async function aiUpscale2x(
     }
   }
 
+  copyUpscaledAlpha(source, width, height, destination, destinationWidth, destinationHeight)
   return { rgba: destination, width: destinationWidth, height: destinationHeight, backend: 'realesrgan' }
 }
