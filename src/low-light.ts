@@ -29,7 +29,7 @@ export function adaptiveLowLight(source: Uint8ClampedArray): { rgba: Uint8Clampe
   const mean = analyse(source)
   const darkness = Math.max(0, Math.min(1, (120 - mean) / 100))
   const gamma = 1 - darkness * 0.42
-  const shadowLift = 8 + darkness * 24
+  const shadowLift = darkness * 28
   const out = new Uint8ClampedArray(source.length)
 
   for (let i = 0; i < source.length; i += 4) {
