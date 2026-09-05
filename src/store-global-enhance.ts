@@ -2,25 +2,10 @@ import { aiEnhanceFaces } from './ai-face-enhance'
 import { aiRestoreImage } from './ai-restore'
 import { aiUpscale2x } from './ai-upscale'
 import { detectFaces } from './ai'
-import { DEFAULT_ENHANCEMENT, enhanceRgba, type EnhancementSettings } from './enhance'
+import { enhanceRgba, type EnhancementSettings } from './enhance'
+import { getEnhancementSettings } from './enhancement-state'
 
 const enhancedBlobs = new WeakMap<File, { key: string; blob: Promise<Blob> }>()
-
-function settingsFromUi(): EnhancementSettings {
-  const settings: EnhancementSettings = { ...DEFAULT_ENHANCEMENT }
-  const root = document.querySelector('#enhance-global')
-  if (!root) return settings
-
-  root.querySelectorAll<HTMLInputElement>('[data-enhance-range]').forEach((input) => {
-    const key = input.dataset.enhanceRange as keyof EnhancementSettings
-    ;(settings as unknown as Record<string, number>)[key] = Number(input.value)
-  })
-  root.querySelectorAll<HTMLButtonElement>('[data-enhance-toggle]').forEach((button) => {
-    const key = button.dataset.enhanceToggle as keyof EnhancementSettings
-    ;(settings as unknown as Record<string, boolean>)[key] = button.getAttribute('aria-pressed') === 'true'
-  })
-  return settings
-}
 
 function settingsKey(settings: EnhancementSettings) {
   return JSON.stringify(settings)
@@ -99,7 +84,7 @@ async function enhanceStoreFile(file: File, settings: EnhancementSettings) {
 }
 
 export async function createEnhancedStoreBitmap(file: File) {
-  const settings = settingsFromUi()
+  const settings = getEnhancementSettings()
   const key = settingsKey(settings)
   let cached = enhancedBlobs.get(file)
   if (!cached || cached.key !== key) {
