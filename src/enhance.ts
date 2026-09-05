@@ -115,16 +115,19 @@ export function autoEnhancement(source: Uint8ClampedArray): EnhancementSettings 
   const variance = Math.max(0, sumSq / Math.max(1, sampled) - mean * mean)
   const std = Math.sqrt(variance)
   const avgSat = satSum / Math.max(1, sampled)
+  const lowLight = mean < 72
+  const brightnessBase = Math.max(-12, Math.min(24, (128 - mean) * 0.22))
+  const shadowsBase = mean < 105 ? Math.min(35, (105 - mean) * 0.45) : 0
   return {
     ...DEFAULT_ENHANCEMENT,
-    brightness: Math.round(Math.max(-12, Math.min(24, (128 - mean) * 0.22))),
+    brightness: Math.round(lowLight ? Math.min(8, brightnessBase * 0.35) : brightnessBase),
     contrast: Math.round(Math.max(-8, Math.min(24, (58 - std) * 0.38))),
-    shadows: mean < 105 ? Math.round(Math.min(35, (105 - mean) * 0.45)) : 0,
+    shadows: Math.round(lowLight ? Math.min(10, shadowsBase * 0.28) : shadowsBase),
     highlights: mean > 165 ? Math.round(Math.max(-24, (165 - mean) * 0.35)) : 0,
     saturation: avgSat < 0.24 ? Math.round(Math.min(18, (0.24 - avgSat) * 80)) : 0,
     sharpness: 12,
     denoise: mean < 80 ? 12 : 4,
-    lowLight: mean < 72,
+    lowLight,
   }
 }
 
