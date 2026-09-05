@@ -360,7 +360,6 @@ async function applyEnhancement(settings: EnhancementSettings, auto = false) {
   self.postMessage({ type: 'status', message: auto ? 'Applying Auto Enhance…' : 'Applying global enhancement…' })
   const { upscale, restoration, faceEnhance } = await rebuildEnhancedImage(enhancementSettings)
   self.postMessage({ type: 'enhancement-settings', settings: enhancementSettings, auto, upscale, restoration, faceEnhance })
-  await regenerateActive(currentMode)
 }
 
 type WorkerMessage =
