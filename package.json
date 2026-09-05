@@ -19,6 +19,7 @@
     "onnxruntime-web": "1.22.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.55.0",
     "typescript": "5.9.2",
     "vite": "7.1.0"
   }
