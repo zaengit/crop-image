@@ -1,3 +1,5 @@
+import { adaptiveLowLight } from './low-light'
+
 export type EnhancementSettings = {
   brightness: number
   contrast: number
@@ -133,12 +135,12 @@ export function enhanceRgba(
   settings: EnhancementSettings,
   faces: Array<{ x: number; y: number; width: number; height: number }> = [],
 ) {
-  const out = new Uint8ClampedArray(original)
+  const base = settings.lowLight ? adaptiveLowLight(original).rgba : new Uint8ClampedArray(original)
+  const out = new Uint8ClampedArray(base)
   const brightness = settings.brightness * 2.1
   const contrast = (259 * (settings.contrast + 255)) / (255 * (259 - settings.contrast))
   const saturation = 1 + settings.saturation / 100
   const temperature = settings.temperature * 0.7
-  const lowLight = settings.lowLight ? 1 : 0
   const restore = settings.restorePhoto ? 1 : 0
 
   for (let i = 0; i < out.length; i += 4) {
@@ -164,12 +166,6 @@ export function enhanceRgba(
     r += temperature
     b -= temperature
 
-    if (lowLight) {
-      y = luma(r, g, b) / 255
-      const lift = (1 - y) * 26
-      r += lift; g += lift; b += lift
-    }
-
     if (restore) {
       const gray = luma(r, g, b)
       r = gray + (r - gray) * 1.08
@@ -187,7 +183,7 @@ export function enhanceRgba(
   processed = applySharpen(processed, width, height, settings.sharpness + (settings.deblur ? 30 : 0) + (settings.restorePhoto ? 10 : 0))
 
   if (settings.faceEnhance && faces.length) {
-    const base = new Uint8ClampedArray(processed)
+    const faceBase = new Uint8ClampedArray(processed)
     for (const face of faces) {
       const x0 = Math.max(0, Math.floor((face.x - face.width * 0.18) * width))
       const y0 = Math.max(0, Math.floor((face.y - face.height * 0.18) * height))
@@ -200,11 +196,11 @@ export function enhanceRgba(
           const feather = Math.max(0, 1 - Math.sqrt(nx * nx + ny * ny))
           if (!feather) continue
           const p = (y * width + x) * 4
-          const localY = luma(base[p], base[p + 1], base[p + 2])
+          const localY = luma(faceBase[p], faceBase[p + 1], faceBase[p + 2])
           const lift = (localY < 145 ? 7 : 3) * feather
-          processed[p] = clamp(base[p] + lift)
-          processed[p + 1] = clamp(base[p + 1] + lift)
-          processed[p + 2] = clamp(base[p + 2] + lift)
+          processed[p] = clamp(faceBase[p] + lift)
+          processed[p + 1] = clamp(faceBase[p + 1] + lift)
+          processed[p + 2] = clamp(faceBase[p + 2] + lift)
         }
       }
     }
