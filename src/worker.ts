@@ -5,6 +5,7 @@ import { detectFaces, type FocusRegion } from './ai'
 import { aiEnhanceFaces } from './ai-face-enhance'
 import { aiRestoreImage } from './ai-restore'
 import { aiUpscale2x } from './ai-upscale'
+import { adaptiveLowLightAccelerated } from './low-light'
 import { PASSPORT_PRESETS, SOCIAL_PRESETS, type ImagePreset } from './presets'
 import { autoEnhancement, DEFAULT_ENHANCEMENT, enhanceRgba, type EnhancementSettings } from './enhance'
 
@@ -301,9 +302,18 @@ async function generatePresets(presets: ImagePreset[], revision: number, manualF
 async function buildEnhancedImage(settings: EnhancementSettings): Promise<EnhancedImage> {
   if (!sourceRgba) throw new Error('Enhancement requires a loaded image')
 
-  const useAiRestore = settings.denoise >= 20 || settings.deblur || settings.restorePhoto
-  const localSettings = useAiRestore ? { ...settings, denoise: 0, deblur: false } : settings
-  let pixels = enhanceRgba(sourceRgba, sourceWidth, sourceHeight, localSettings, cachedFocus)
+  let enhancementSource = sourceRgba
+  let effectiveSettings = settings
+  if (settings.lowLight) {
+    self.postMessage({ type: 'status', message: 'Optimizing low light…' })
+    const lowLight = await adaptiveLowLightAccelerated(sourceRgba)
+    enhancementSource = lowLight.rgba
+    effectiveSettings = { ...settings, lowLight: false }
+  }
+
+  const useAiRestore = effectiveSettings.denoise >= 20 || effectiveSettings.deblur || effectiveSettings.restorePhoto
+  const localSettings = useAiRestore ? { ...effectiveSettings, denoise: 0, deblur: false } : effectiveSettings
+  let pixels = enhanceRgba(enhancementSource, sourceWidth, sourceHeight, localSettings, cachedFocus)
   let width = sourceWidth
   let height = sourceHeight
   let restoration: RestorationInfo | undefined
@@ -312,7 +322,7 @@ async function buildEnhancedImage(settings: EnhancementSettings): Promise<Enhanc
 
   if (useAiRestore) {
     try {
-      const strength = Math.min(0.9, 0.42 + Math.min(0.25, settings.denoise / 250) + (settings.deblur ? 0.14 : 0) + (settings.restorePhoto ? 0.08 : 0))
+      const strength = Math.min(0.9, 0.42 + Math.min(0.25, effectiveSettings.denoise / 250) + (effectiveSettings.deblur ? 0.14 : 0) + (effectiveSettings.restorePhoto ? 0.08 : 0))
       self.postMessage({ type: 'status', message: 'Loading AI restoration model…' })
       const restored = await aiRestoreImage(pixels, width, height, strength, (done, total) => {
         self.postMessage({ type: 'status', message: `AI restoring… ${progressPercent(done, total)}%` })
@@ -322,7 +332,7 @@ async function buildEnhancedImage(settings: EnhancementSettings): Promise<Enhanc
     } catch (error) {
       console.warn('AI restoration unavailable; using local denoise/deblur fallback.', error)
       self.postMessage({ type: 'status', message: 'AI restoration unavailable. Using local fallback…' })
-      pixels = enhanceRgba(sourceRgba, sourceWidth, sourceHeight, settings, cachedFocus)
+      pixels = enhanceRgba(enhancementSource, sourceWidth, sourceHeight, effectiveSettings, cachedFocus)
       restoration = { method: 'local', fallback: error instanceof Error ? error.message : String(error) }
     }
   }
