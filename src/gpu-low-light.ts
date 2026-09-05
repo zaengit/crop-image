@@ -1,55 +1,4 @@
-import { isWebGpuSupported } from './gpu-capabilities'
-
-type GpuAdapter = {
-  requestDevice: () => Promise<GpuDevice>
-}
-
-type GpuBuffer = {
-  destroy: () => void
-  mapAsync: (mode: number) => Promise<void>
-  getMappedRange: () => ArrayBuffer
-  unmap: () => void
-}
-
-type GpuDevice = {
-  createShaderModule: (options: { code: string }) => unknown
-  createComputePipeline: (options: { layout: 'auto'; compute: { module: unknown; entryPoint: string } }) => {
-    getBindGroupLayout: (index: number) => unknown
-  }
-  createBuffer: (options: { size: number; usage: number; mappedAtCreation?: boolean }) => GpuBuffer
-  createBindGroup: (options: { layout: unknown; entries: Array<{ binding: number; resource: { buffer: GpuBuffer } }> }) => unknown
-  createCommandEncoder: () => {
-    beginComputePass: () => {
-      setPipeline: (pipeline: unknown) => void
-      setBindGroup: (index: number, bindGroup: unknown) => void
-      dispatchWorkgroups: (x: number) => void
-      end: () => void
-    }
-    copyBufferToBuffer: (source: GpuBuffer, sourceOffset: number, destination: GpuBuffer, destinationOffset: number, size: number) => void
-    finish: () => unknown
-  }
-  queue: {
-    writeBuffer: (buffer: GpuBuffer, offset: number, data: ArrayBufferView) => void
-    submit: (commands: unknown[]) => void
-  }
-}
-
-type WebGpuNavigator = Navigator & {
-  gpu?: {
-    requestAdapter: (options?: { powerPreference?: 'low-power' | 'high-performance' }) => Promise<GpuAdapter | null>
-  }
-}
-
-type WebGpuGlobals = typeof globalThis & {
-  GPUBufferUsage?: {
-    STORAGE: number
-    COPY_SRC: number
-    COPY_DST: number
-    MAP_READ: number
-    UNIFORM: number
-  }
-  GPUMapMode?: { READ: number }
-}
+import { getSharedGpuDevice, getWebGpuGlobals, type GpuBuffer } from './webgpu-runtime'
 
 const SHADER = `
 struct Params {
@@ -104,21 +53,18 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
 }
 `
 
-let devicePromise: Promise<GpuDevice> | undefined
+let pipelineCache: { generation: number; pipeline: { getBindGroupLayout: (index: number) => unknown } } | undefined
 
-async function getDevice() {
-  devicePromise ??= (async () => {
-    if (!(await isWebGpuSupported())) throw new Error('WebGPU unavailable')
-    const gpu = (navigator as WebGpuNavigator).gpu
-    if (!gpu) throw new Error('WebGPU unavailable')
-    const adapter = await gpu.requestAdapter({ powerPreference: 'high-performance' })
-    if (!adapter) throw new Error('No WebGPU adapter')
-    return adapter.requestDevice()
-  })().catch((error) => {
-    devicePromise = undefined
-    throw error
-  })
-  return devicePromise
+async function getPipeline() {
+  const { device, generation } = await getSharedGpuDevice()
+  if (!pipelineCache || pipelineCache.generation !== generation) {
+    const module = device.createShaderModule({ code: SHADER })
+    pipelineCache = {
+      generation,
+      pipeline: device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } }),
+    }
+  }
+  return { device, pipeline: pipelineCache.pipeline }
 }
 
 export async function runLowLightWebGpu(
@@ -127,12 +73,8 @@ export async function runLowLightWebGpu(
   shadowLift: number,
   saturationProtect: number,
 ) {
-  const globals = globalThis as WebGpuGlobals
-  const usage = globals.GPUBufferUsage
-  const mapMode = globals.GPUMapMode
-  if (!usage || !mapMode) throw new Error('WebGPU buffer constants unavailable')
-
-  const device = await getDevice()
+  const { usage, mapMode } = getWebGpuGlobals()
+  const { device, pipeline } = await getPipeline()
   const pixelCount = source.length / 4
   const byteLength = source.byteLength
   const packed = new Uint32Array(pixelCount)
@@ -142,6 +84,7 @@ export async function runLowLightWebGpu(
   const output = device.createBuffer({ size: byteLength, usage: usage.STORAGE | usage.COPY_SRC })
   const readback = device.createBuffer({ size: byteLength, usage: usage.COPY_DST | usage.MAP_READ })
   const params = device.createBuffer({ size: 16, usage: usage.UNIFORM | usage.COPY_DST })
+  let mappedReadback: GpuBuffer | undefined
 
   try {
     device.queue.writeBuffer(input, 0, packed)
@@ -153,8 +96,6 @@ export async function runLowLightWebGpu(
     view.setFloat32(12, saturationProtect, true)
     device.queue.writeBuffer(params, 0, new Uint8Array(paramBytes))
 
-    const module = device.createShaderModule({ code: SHADER })
-    const pipeline = device.createComputePipeline({ layout: 'auto', compute: { module, entryPoint: 'main' } })
     const bindGroup = device.createBindGroup({
       layout: pipeline.getBindGroupLayout(0),
       entries: [
@@ -174,9 +115,13 @@ export async function runLowLightWebGpu(
     device.queue.submit([encoder.finish()])
 
     await readback.mapAsync(mapMode.READ)
-    const mapped = readback.getMappedRange()
-    return new Uint8ClampedArray(mapped.slice(0))
+    mappedReadback = readback
+    const result = new Uint8ClampedArray(readback.getMappedRange().slice(0))
+    readback.unmap()
+    mappedReadback = undefined
+    return result
   } finally {
+    if (mappedReadback) mappedReadback.unmap()
     input.destroy()
     output.destroy()
     params.destroy()
