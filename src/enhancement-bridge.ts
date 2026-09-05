@@ -1,5 +1,7 @@
 import './enhancement.css'
 import { DEFAULT_ENHANCEMENT, type EnhancementSettings } from './enhance'
+import { setEnhancementSettings } from './enhancement-state'
+import { onCropWorker } from './worker-channel'
 
 const root = document.createElement('section')
 root.id = 'enhance-global'
@@ -46,15 +48,20 @@ function toggle(key: keyof EnhancementSettings, label: string) {
   return `<button class="enhance-toggle" type="button" data-enhance-toggle="${key}" aria-pressed="false">${label}</button>`
 }
 
-const upload = document.querySelector('#image-batch') ?? document.querySelector('#dropzone')
+const upload = document.querySelector('#dropzone')
 upload?.insertAdjacentElement('afterend', root)
 
 let settings: EnhancementSettings = { ...DEFAULT_ENHANCEMENT }
 let latestWorker: Worker | undefined
+let boundWorker: Worker | undefined
 let timer: number | undefined
 let comparing = false
 const status = root.querySelector<HTMLElement>('#enhance-status')!
 const focusImage = document.querySelector<HTMLImageElement>('#focus-image')
+
+function publishSettings() {
+  setEnhancementSettings(settings)
+}
 
 function isAiHeavy(value: EnhancementSettings) {
   return value.denoise >= 20 || value.deblur || value.restorePhoto || value.faceEnhance || value.upscale2x
@@ -62,6 +69,7 @@ function isAiHeavy(value: EnhancementSettings) {
 
 function sendEnhancement(reason = 'Applying enhancement…') {
   applyPreview()
+  publishSettings()
   if (!latestWorker) return
   status.textContent = reason
   latestWorker.postMessage({ type: 'enhancement', settings })
@@ -69,6 +77,7 @@ function sendEnhancement(reason = 'Applying enhancement…') {
 
 function schedule() {
   applyPreview()
+  publishSettings()
   if (timer) window.clearTimeout(timer)
   if (isAiHeavy(settings)) {
     status.textContent = 'Release the slider to apply AI enhancement.'
@@ -106,6 +115,7 @@ function syncControls() {
     button.setAttribute('aria-pressed', String(active))
   })
   applyPreview()
+  publishSettings()
 }
 
 root.querySelectorAll<HTMLInputElement>('[data-enhance-range]').forEach((input) => {
@@ -161,82 +171,56 @@ compare.addEventListener('pointerleave', endCompare)
 compare.addEventListener('keydown', (event) => { if (event.key === ' ' || event.key === 'Enter') beginCompare() })
 compare.addEventListener('keyup', endCompare)
 
-function bindCropWorker(worker: Worker) {
-  if (latestWorker === worker) return
-  latestWorker = worker
-  root.hidden = false
+function handleWorkerMessage(event: MessageEvent) {
+  const message = event.data
+  if (message?.type === 'enhancement-settings') {
+    settings = { ...DEFAULT_ENHANCEMENT, ...message.settings } as EnhancementSettings
+    syncControls()
+    const restoreLabel = message.restoration
+      ? message.restoration.method === 'ai'
+        ? 'AI Restoration'
+        : 'local restoration fallback'
+      : ''
+    const faceLabel = message.faceEnhance
+      ? message.faceEnhance.method === 'ai'
+        ? `AI Face Enhance (${message.faceEnhance.faces})`
+        : message.faceEnhance.faces === 0
+          ? 'No face detected'
+          : 'local face fallback'
+      : ''
 
-  worker.addEventListener('message', (event) => {
-    const message = event.data
-    if (message?.type === 'enhancement-settings') {
-      settings = { ...DEFAULT_ENHANCEMENT, ...message.settings } as EnhancementSettings
-      syncControls()
-      const restoreLabel = message.restoration
-        ? message.restoration.method === 'ai'
-          ? 'AI Restoration'
-          : 'local restoration fallback'
-        : ''
-      const faceLabel = message.faceEnhance
-        ? message.faceEnhance.method === 'ai'
-          ? `AI Face Enhance (${message.faceEnhance.faces})`
-          : message.faceEnhance.faces === 0
-            ? 'No face detected'
-            : 'local face fallback'
-        : ''
-
-      if (message.upscale) {
-        const scale = Number(message.upscale.scale ?? 1).toFixed(2).replace(/\.00$/, '')
-        const method = message.upscale.method === 'ai' ? 'AI Super Resolution' : 'high-quality fallback'
-        const suffix = [restoreLabel, faceLabel].filter(Boolean).map((label) => ` · ${label}`).join('')
-        status.textContent = `${method} ${scale}× ready — ${message.upscale.width} × ${message.upscale.height}${suffix}. Click Generate crop to update outputs.`
-      } else if (restoreLabel || faceLabel) {
-        status.textContent = `${[restoreLabel, faceLabel].filter(Boolean).join(' · ')} ready. Click Generate crop to update outputs.`
-      } else if (message.auto) {
-        status.textContent = 'Auto Enhance ready — click Generate crop to update outputs.'
-      } else {
-        status.textContent = Object.values(settings).some((value) => value !== 0 && value !== false)
-          ? 'Enhancement ready — click Generate crop to update outputs.'
-          : 'Optional — crop can be generated without enhancement.'
-      }
+    if (message.upscale) {
+      const scale = Number(message.upscale.scale ?? 1).toFixed(2).replace(/\.00$/, '')
+      const method = message.upscale.method === 'ai' ? 'AI Super Resolution' : 'high-quality fallback'
+      const suffix = [restoreLabel, faceLabel].filter(Boolean).map((label) => ` · ${label}`).join('')
+      status.textContent = `${method} ${scale}× ready — ${message.upscale.width} × ${message.upscale.height}${suffix}. Click Generate crop to update outputs.`
+    } else if (restoreLabel || faceLabel) {
+      status.textContent = `${[restoreLabel, faceLabel].filter(Boolean).join(' · ')} ready. Click Generate crop to update outputs.`
+    } else if (message.auto) {
+      status.textContent = 'Auto Enhance ready — click Generate crop to update outputs.'
+    } else {
+      status.textContent = Object.values(settings).some((value) => value !== 0 && value !== false)
+        ? 'Enhancement ready — click Generate crop to update outputs.'
+        : 'Optional — crop can be generated without enhancement.'
     }
-    if (message?.type === 'done' && !status.textContent?.startsWith('Auto Enhance') && !status.textContent?.includes('ready —') && !status.textContent?.includes('Restoration') && !status.textContent?.includes('Face Enhance')) {
-      status.textContent = 'Optional — crop can be generated without enhancement.'
-    }
-    if (message?.type === 'error' && String(message.message ?? '').toLowerCase().includes('enhanc')) {
-      status.textContent = `Enhancement error: ${message.message}`
-    }
-  })
-
-  const nativeTerminate = worker.terminate.bind(worker)
-  worker.terminate = () => {
-    nativeTerminate()
-    if (latestWorker === worker) latestWorker = undefined
+  }
+  if (message?.type === 'done' && !status.textContent?.startsWith('Auto Enhance') && !status.textContent?.includes('ready —') && !status.textContent?.includes('Restoration') && !status.textContent?.includes('Face Enhance')) {
+    status.textContent = 'Optional — crop can be generated without enhancement.'
+  }
+  if (message?.type === 'error' && String(message.message ?? '').toLowerCase().includes('enhanc')) {
+    status.textContent = `Enhancement error: ${message.message}`
   }
 }
 
-function isCropLoadMessage(message: unknown) {
-  if (!message || typeof message !== 'object') return false
-  const candidate = message as Record<string, unknown>
-  return candidate.type === 'load'
-    && candidate.rgba instanceof ArrayBuffer
-    && typeof candidate.width === 'number'
-    && typeof candidate.height === 'number'
+function bindCropWorker(worker: Worker | undefined) {
+  if (boundWorker === worker) return
+  if (boundWorker) boundWorker.removeEventListener('message', handleWorkerMessage)
+  boundWorker = worker
+  latestWorker = worker
+  if (!worker) return
+  root.hidden = false
+  worker.addEventListener('message', handleWorkerMessage)
 }
 
-const nativePostMessage = Worker.prototype.postMessage
-const callNativePostMessage = nativePostMessage.call.bind(nativePostMessage) as (
-  worker: Worker,
-  message: unknown,
-  transferOrOptions?: Transferable[] | StructuredSerializeOptions,
-) => void
-
-Worker.prototype.postMessage = function (
-  this: Worker,
-  message: unknown,
-  transferOrOptions?: Transferable[] | StructuredSerializeOptions,
-) {
-  if (isCropLoadMessage(message)) bindCropWorker(this)
-  callNativePostMessage(this, message, transferOrOptions)
-} as Worker['postMessage']
-
+onCropWorker(bindCropWorker)
 syncControls()
