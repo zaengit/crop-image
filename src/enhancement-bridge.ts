@@ -53,8 +53,14 @@ let settings: EnhancementSettings = { ...DEFAULT_ENHANCEMENT }
 let latestWorker: Worker | undefined
 let timer: number | undefined
 let comparing = false
+let applyingPersistedSettings = false
 const status = root.querySelector<HTMLElement>('#enhance-status')!
 const focusImage = document.querySelector<HTMLImageElement>('#focus-image')
+
+function isDefaultSettings(value: EnhancementSettings) {
+  return (Object.keys(DEFAULT_ENHANCEMENT) as Array<keyof EnhancementSettings>)
+    .every((key) => value[key] === DEFAULT_ENHANCEMENT[key])
+}
 
 function sendEnhancement(reason = 'Applying enhancement…') {
   applyPreview()
@@ -148,41 +154,78 @@ compare.addEventListener('pointerleave', endCompare)
 compare.addEventListener('keydown', (event) => { if (event.key === ' ' || event.key === 'Enter') beginCompare() })
 compare.addEventListener('keyup', endCompare)
 
+function bindCropWorker(worker: Worker) {
+  latestWorker = worker
+  root.hidden = false
+  worker.addEventListener('message', (event) => {
+    const message = event.data
+    if (message?.type === 'enhancement-settings') {
+      const incoming = { ...DEFAULT_ENHANCEMENT, ...message.settings } as EnhancementSettings
+
+      // Every freshly-created crop worker starts at defaults. Keep the user's
+      // global settings across batch-image switches and apply them to the new worker.
+      if (!message.auto && isDefaultSettings(incoming) && !isDefaultSettings(settings) && !applyingPersistedSettings) {
+        applyingPersistedSettings = true
+        status.textContent = 'Applying global enhancement to this image…'
+        worker.postMessage({ type: 'enhancement', settings })
+        return
+      }
+
+      applyingPersistedSettings = false
+      settings = incoming
+      syncControls()
+      const restoreLabel = message.restoration
+        ? message.restoration.method === 'ai'
+          ? 'AI Restoration'
+          : 'local restoration fallback'
+        : ''
+      const faceLabel = message.faceEnhance
+        ? message.faceEnhance.method === 'ai'
+          ? `AI Face Enhance (${message.faceEnhance.faces})`
+          : 'local face fallback'
+        : ''
+
+      if (message.upscale) {
+        const scale = Number(message.upscale.scale ?? 1).toFixed(2).replace(/\.00$/, '')
+        const method = message.upscale.method === 'ai' ? 'AI Super Resolution' : 'high-quality fallback'
+        const suffix = [restoreLabel, faceLabel].filter(Boolean).map((label) => ` · ${label}`).join('')
+        status.textContent = `${method} ${scale}× active — ${message.upscale.width} × ${message.upscale.height}${suffix}.`
+      } else if (restoreLabel || faceLabel) {
+        status.textContent = `${[restoreLabel, faceLabel].filter(Boolean).join(' · ')} applied to all generated sizes.`
+      } else {
+        status.textContent = message.auto ? 'Auto Enhance applied to all generated sizes.' : 'Enhancement updated.'
+      }
+    }
+    if (message?.type === 'done' && !status.textContent?.startsWith('Auto Enhance') && !status.textContent?.includes('active —') && !status.textContent?.includes('Restoration') && !status.textContent?.includes('Face Enhance')) {
+      status.textContent = 'Enhancement is applied locally to all generated sizes.'
+    }
+    if (message?.type === 'error' && String(message.message ?? '').toLowerCase().includes('enhanc')) {
+      applyingPersistedSettings = false
+      status.textContent = `Enhancement error: ${message.message}`
+    }
+  })
+}
+
 const NativeWorker = window.Worker
+let trackedCropWorker: Worker | undefined
 const TrackingWorker = new Proxy(NativeWorker, {
   construct(target, args) {
     const worker = Reflect.construct(target, args) as Worker
-    latestWorker = worker
-    root.hidden = false
-    worker.addEventListener('message', (event) => {
-      const message = event.data
-      if (message?.type === 'enhancement-settings') {
-        settings = { ...settings, ...message.settings }
-        syncControls()
-        const restoreLabel = message.restoration
-          ? message.restoration.method === 'ai'
-            ? 'AI Restoration'
-            : 'local restoration fallback'
-          : ''
-
-        if (message.upscale) {
-          const scale = Number(message.upscale.scale ?? 1).toFixed(2).replace(/\.00$/, '')
-          const method = message.upscale.method === 'ai' ? 'AI Super Resolution' : 'high-quality fallback'
-          const suffix = restoreLabel ? ` · ${restoreLabel}` : ''
-          status.textContent = `${method} ${scale}× active — ${message.upscale.width} × ${message.upscale.height}${suffix}.`
-        } else if (restoreLabel) {
-          status.textContent = `${restoreLabel} applied to all generated sizes.`
-        } else {
-          status.textContent = message.auto ? 'Auto Enhance applied to all generated sizes.' : 'Enhancement updated.'
+    // Only bind the first application worker. ONNX/MediaPipe or future auxiliary
+    // workers must never replace the crop worker used by the global controls.
+    if (!trackedCropWorker) {
+      trackedCropWorker = worker
+      bindCropWorker(worker)
+      const nativeTerminate = worker.terminate.bind(worker)
+      worker.terminate = () => {
+        nativeTerminate()
+        if (trackedCropWorker === worker) {
+          trackedCropWorker = undefined
+          latestWorker = undefined
+          applyingPersistedSettings = false
         }
       }
-      if (message?.type === 'done' && !status.textContent?.startsWith('Auto Enhance') && !status.textContent?.includes('active —') && !status.textContent?.includes('Restoration')) {
-        status.textContent = 'Enhancement is applied locally to all generated sizes.'
-      }
-      if (message?.type === 'error' && String(message.message ?? '').toLowerCase().includes('enhanc')) {
-        status.textContent = `Enhancement error: ${message.message}`
-      }
-    })
+    }
     return worker
   },
 }) as typeof Worker
