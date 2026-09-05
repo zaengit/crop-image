@@ -3,6 +3,7 @@
 import { FilesetResolver, ImageSegmenter } from '@mediapipe/tasks-vision'
 import initWasm, { smart_crop_png } from './wasm/pkg/crop_image_wasm.js'
 import { detectFaces, type FocusRegion } from './ai'
+import { aiRestoreImage } from './ai-restore'
 import { aiUpscale2x } from './ai-upscale'
 import { PASSPORT_PRESETS, SOCIAL_PRESETS, type ImagePreset } from './presets'
 import { autoEnhancement, DEFAULT_ENHANCEMENT, enhanceRgba, type EnhancementSettings } from './enhance'
@@ -15,6 +16,11 @@ type UpscaleInfo = {
   width: number
   height: number
   method: 'ai' | 'resample'
+  fallback?: string
+}
+
+type RestorationInfo = {
+  method: 'ai' | 'local'
   fallback?: string
 }
 
@@ -254,10 +260,40 @@ async function regenerateActive(mode: Mode) {
 
 async function rebuildEnhancedImage(settings: EnhancementSettings) {
   if (!sourceRgba) throw new Error('Enhancement requires a loaded image')
-  let pixels = enhanceRgba(sourceRgba, sourceWidth, sourceHeight, settings, cachedFocus)
+
+  const useAiRestore = settings.denoise >= 20 || settings.deblur || settings.restorePhoto
+  const localSettings = useAiRestore
+    ? { ...settings, denoise: 0, deblur: false }
+    : settings
+
+  let pixels = enhanceRgba(sourceRgba, sourceWidth, sourceHeight, localSettings, cachedFocus)
   let width = sourceWidth
   let height = sourceHeight
+  let restoration: RestorationInfo | undefined
   let upscale: UpscaleInfo | undefined
+
+  if (useAiRestore) {
+    try {
+      const strength = Math.min(
+        0.9,
+        0.42 + Math.min(0.25, settings.denoise / 250) + (settings.deblur ? 0.14 : 0) + (settings.restorePhoto ? 0.08 : 0),
+      )
+      self.postMessage({ type: 'status', message: 'Loading AI restoration model…' })
+      const restored = await aiRestoreImage(pixels, width, height, strength, (done, total) => {
+        self.postMessage({ type: 'status', message: `AI restoring ${done} / ${total} tiles…` })
+      })
+      pixels = restored.rgba
+      restoration = { method: 'ai' }
+    } catch (error) {
+      console.warn('AI restoration unavailable; using local denoise/deblur fallback.', error)
+      self.postMessage({ type: 'status', message: 'AI restoration unavailable. Using local fallback…' })
+      pixels = enhanceRgba(sourceRgba, sourceWidth, sourceHeight, settings, cachedFocus)
+      restoration = {
+        method: 'local',
+        fallback: error instanceof Error ? error.message : String(error),
+      }
+    }
+  }
 
   if (settings.upscale2x) {
     const scaled = await upscaleRgba(pixels, width, height)
@@ -279,15 +315,15 @@ async function rebuildEnhancedImage(settings: EnhancementSettings) {
   cachedPersonMask = undefined
   passportRgba = undefined
   if (passportBackground !== 'original') await composePassportBackground(passportBackground)
-  return upscale
+  return { upscale, restoration }
 }
 
 async function applyEnhancement(settings: EnhancementSettings, auto = false) {
   if (!sourceRgba) throw new Error('Enhancement requires a loaded image')
   enhancementSettings = { ...DEFAULT_ENHANCEMENT, ...settings }
   self.postMessage({ type: 'status', message: auto ? 'Applying Auto Enhance…' : 'Applying global enhancement…' })
-  const upscale = await rebuildEnhancedImage(enhancementSettings)
-  self.postMessage({ type: 'enhancement-settings', settings: enhancementSettings, auto, upscale })
+  const { upscale, restoration } = await rebuildEnhancedImage(enhancementSettings)
+  self.postMessage({ type: 'enhancement-settings', settings: enhancementSettings, auto, upscale, restoration })
   await regenerateActive(currentMode)
 }
 
