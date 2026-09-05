@@ -5,6 +5,7 @@ type StoreOrientation = 'portrait' | 'landscape' | 'both'
 type ResizeMode = 'fit' | 'fill' | 'smart'
 type StoreFormat = 'png' | 'jpeg'
 type IconFitMode = 'fit' | 'fill'
+type ZipEntry = { path: string; blob?: Blob; bytes?: Uint8Array }
 
 type ScreenshotSource = {
   id: string
@@ -173,10 +174,14 @@ async function decodeStoreFile(file: File): Promise<DecodedStoreSource> {
   try {
     return await decodeWithImageElement(file)
   } catch (fallbackError) {
-    const primary = primaryError instanceof Error ? primaryError.message : primaryError ? String(primaryError) : ''
+    const primary = bitmapErrorText(primaryError)
     const fallback = fallbackError instanceof Error ? fallbackError.message : String(fallbackError)
     throw new Error(primary ? `${fallback} Primary decoder: ${primary}` : fallback)
   }
+}
+
+function bitmapErrorText(error: unknown) {
+  return error instanceof Error ? error.message : error ? String(error) : ''
 }
 
 function canvasBlob(canvas: HTMLCanvasElement, format: StoreFormat, quality = 0.92) {
@@ -344,7 +349,7 @@ async function renderIcon(
   return canvasBlob(canvas, 'png')
 }
 
-async function createStreamingZip(entries: Array<{ path: string; blob?: Blob; bytes?: Uint8Array }>) {
+async function createStreamingZip(entries: ZipEntry[]) {
   return new Promise<Blob>((resolve, reject) => {
     const chunks: Uint8Array[] = []
     let settled = false
@@ -726,8 +731,8 @@ export function initStoreAssets() {
           quality: item.quality,
         })),
       }, null, 2))
-      const entries = screenshotOutputs.map((output) => ({ path: `${output.folder}/${output.filename}`, blob: output.blob }))
-      entries.push({ path: 'app-store-assets/screenshots/manifest.json', bytes: manifest } as { path: string; blob?: Blob; bytes?: Uint8Array })
+      const entries: ZipEntry[] = screenshotOutputs.map((output) => ({ path: `${output.folder}/${output.filename}`, blob: output.blob }))
+      entries.push({ path: 'app-store-assets/screenshots/manifest.json', bytes: manifest })
       const zip = await createStreamingZip(entries)
       download(zip, 'app-store-screenshots.zip')
       screenshotStatus.textContent = 'Screenshots ZIP ready.'
@@ -838,8 +843,8 @@ export function initStoreAssets() {
         roundedCornersBakedIn: false,
         files: iconOutputs.map((item) => ({ filename: `${item.folder}/${item.filename}`, width: item.width, height: item.height })),
       }, null, 2))
-      const entries = iconOutputs.map((output) => ({ path: `${output.folder}/${output.filename}`, blob: output.blob }))
-      entries.push({ path: 'app-store-assets/icons/manifest.json', bytes: manifest } as { path: string; blob?: Blob; bytes?: Uint8Array })
+      const entries: ZipEntry[] = iconOutputs.map((output) => ({ path: `${output.folder}/${output.filename}`, blob: output.blob }))
+      entries.push({ path: 'app-store-assets/icons/manifest.json', bytes: manifest })
       const zip = await createStreamingZip(entries)
       download(zip, 'app-icons.zip')
       iconStatus.textContent = 'Icons ZIP ready.'
