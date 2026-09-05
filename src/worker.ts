@@ -70,6 +70,17 @@ let generationRevision = 0
 let enhancementRevision = 0
 let backgroundRevision = 0
 
+class EnhancementCancelled extends Error {
+  constructor() {
+    super('Enhancement superseded by a newer request')
+    this.name = 'EnhancementCancelled'
+  }
+}
+
+function assertEnhancementCurrent(revision: number) {
+  if (revision !== enhancementRevision) throw new EnhancementCancelled()
+}
+
 function ensureWasm() { wasmReady ??= initWasm(); return wasmReady }
 
 function progressPercent(done: number, total: number) {
@@ -162,7 +173,12 @@ async function resampleRgba(source: Uint8ClampedArray, width: number, height: nu
   return targetCtx.getImageData(0, 0, targetWidth, targetHeight).data
 }
 
-async function upscaleRgba(source: Uint8ClampedArray, width: number, height: number) {
+async function upscaleRgba(
+  source: Uint8ClampedArray,
+  width: number,
+  height: number,
+  isCurrent: () => boolean = () => true,
+) {
   const target = upscaleDimensions(width, height)
   if (target.scale <= 1.001) {
     return { rgba: new Uint8ClampedArray(source), width, height, scale: 1, method: 'resample' as const }
@@ -170,15 +186,18 @@ async function upscaleRgba(source: Uint8ClampedArray, width: number, height: num
 
   if (target.scale >= 1.999) {
     try {
-      self.postMessage({ type: 'status', message: 'Loading AI super-resolution model…' })
+      if (isCurrent()) self.postMessage({ type: 'status', message: 'Loading AI super-resolution model…' })
       const ai = await aiUpscale2x(source, width, height, (done, total) => {
-        self.postMessage({ type: 'status', message: `AI upscaling… ${progressPercent(done, total)}%` })
+        if (isCurrent()) self.postMessage({ type: 'status', message: `AI upscaling… ${progressPercent(done, total)}%` })
       })
+      if (!isCurrent()) throw new EnhancementCancelled()
       return { rgba: ai.rgba, width: ai.width, height: ai.height, scale: 2, method: 'ai' as const }
     } catch (error) {
+      if (!isCurrent() || error instanceof EnhancementCancelled) throw new EnhancementCancelled()
       console.warn('AI super resolution unavailable; using high-quality resampling.', error)
       self.postMessage({ type: 'status', message: 'AI model unavailable. Using high-quality 2× fallback…' })
       const rgba = await resampleRgba(source, width, height, target.width, target.height)
+      if (!isCurrent()) throw new EnhancementCancelled()
       return {
         rgba,
         width: target.width,
@@ -190,8 +209,9 @@ async function upscaleRgba(source: Uint8ClampedArray, width: number, height: num
     }
   }
 
-  self.postMessage({ type: 'status', message: 'Image is large. Using memory-safe upscale…' })
+  if (isCurrent()) self.postMessage({ type: 'status', message: 'Image is large. Using memory-safe upscale…' })
   const rgba = await resampleRgba(source, width, height, target.width, target.height)
+  if (!isCurrent()) throw new EnhancementCancelled()
   return { rgba, width: target.width, height: target.height, scale: target.scale, method: 'resample' as const }
 }
 
@@ -302,8 +322,10 @@ async function generatePresets(presets: ImagePreset[], revision: number, manualF
   return revision === generationRevision
 }
 
-async function buildEnhancedImage(settings: EnhancementSettings): Promise<EnhancedImage> {
+async function buildEnhancedImage(settings: EnhancementSettings, revision: number): Promise<EnhancedImage> {
   if (!sourceRgba) throw new Error('Enhancement requires a loaded image')
+  const isCurrent = () => revision === enhancementRevision
+  assertEnhancementCurrent(revision)
 
   const useAiRestore = settings.denoise >= 20 || settings.deblur || settings.restorePhoto
   const localSettings = useAiRestore ? { ...settings, denoise: 0, deblur: false } : settings
@@ -321,7 +343,9 @@ async function buildEnhancedImage(settings: EnhancementSettings): Promise<Enhanc
         residentDetail.denoise,
         residentDetail.sharpen,
       )
+      assertEnhancementCurrent(revision)
     } catch (error) {
+      assertEnhancementCurrent(revision)
       console.warn('GPU-resident enhancement unavailable; using staged fallback.', error)
     }
   }
@@ -330,9 +354,11 @@ async function buildEnhancedImage(settings: EnhancementSettings): Promise<Enhanc
   let effectiveSettings = settings
 
   if (!pixels) {
+    assertEnhancementCurrent(revision)
     if (settings.lowLight) {
       self.postMessage({ type: 'status', message: 'Optimizing low light…' })
       const lowLight = await adaptiveLowLightAccelerated(sourceRgba)
+      assertEnhancementCurrent(revision)
       enhancementSource = lowLight.rgba
       effectiveSettings = { ...settings, lowLight: false }
     }
@@ -341,6 +367,7 @@ async function buildEnhancedImage(settings: EnhancementSettings): Promise<Enhanc
       try {
         self.postMessage({ type: 'status', message: 'Applying GPU adjustments…' })
         enhancementSource = await runGlobalAdjustmentsWebGpu(enhancementSource, effectiveSettings)
+        assertEnhancementCurrent(revision)
         effectiveSettings = {
           ...effectiveSettings,
           brightness: 0,
@@ -351,19 +378,24 @@ async function buildEnhancedImage(settings: EnhancementSettings): Promise<Enhanc
           temperature: 0,
         }
       } catch (error) {
+        assertEnhancementCurrent(revision)
         console.warn('WebGPU global adjustments unavailable; using CPU fallback.', error)
       }
     }
 
+    assertEnhancementCurrent(revision)
     const stagedLocalSettings = useAiRestore ? { ...effectiveSettings, denoise: 0, deblur: false } : effectiveSettings
     const detail = detailStrengths(stagedLocalSettings)
 
     if ((detail.denoise > 0 || detail.sharpen > 0) && !stagedLocalSettings.faceEnhance) {
       const toned = enhanceRgba(enhancementSource, sourceWidth, sourceHeight, stagedLocalSettings, cachedFocus, { skipDetail: true })
+      assertEnhancementCurrent(revision)
       try {
         self.postMessage({ type: 'status', message: 'Applying GPU detail enhancement…' })
         pixels = await runDetailWebGpu(toned, sourceWidth, sourceHeight, detail.denoise, detail.sharpen)
+        assertEnhancementCurrent(revision)
       } catch (error) {
+        assertEnhancementCurrent(revision)
         console.warn('WebGPU detail enhancement unavailable; using CPU fallback.', error)
         pixels = enhanceRgba(enhancementSource, sourceWidth, sourceHeight, stagedLocalSettings, cachedFocus)
       }
@@ -372,6 +404,7 @@ async function buildEnhancedImage(settings: EnhancementSettings): Promise<Enhanc
     }
   }
 
+  assertEnhancementCurrent(revision)
   let width = sourceWidth
   let height = sourceHeight
   let restoration: RestorationInfo | undefined
@@ -383,18 +416,21 @@ async function buildEnhancedImage(settings: EnhancementSettings): Promise<Enhanc
       const strength = Math.min(0.9, 0.42 + Math.min(0.25, settings.denoise / 250) + (settings.deblur ? 0.14 : 0) + (settings.restorePhoto ? 0.08 : 0))
       self.postMessage({ type: 'status', message: 'Loading AI restoration model…' })
       const restored = await aiRestoreImage(pixels, width, height, strength, (done, total) => {
-        self.postMessage({ type: 'status', message: `AI restoring… ${progressPercent(done, total)}%` })
+        if (isCurrent()) self.postMessage({ type: 'status', message: `AI restoring… ${progressPercent(done, total)}%` })
       })
+      assertEnhancementCurrent(revision)
       pixels = restored.rgba
       restoration = { method: 'ai' }
     } catch (error) {
+      assertEnhancementCurrent(revision)
       console.warn('AI restoration unavailable; using local denoise/deblur fallback.', error)
       self.postMessage({ type: 'status', message: 'AI restoration unavailable. Using local fallback…' })
       pixels = enhanceRgba(sourceRgba, sourceWidth, sourceHeight, settings, cachedFocus)
-      restoration = { method: 'local', fallback: error instanceof Error ? error.message : String(error) }
+    	  restoration = { method: 'local', fallback: error instanceof Error ? error.message : String(error) }
     }
   }
 
+  assertEnhancementCurrent(revision)
   if (settings.faceEnhance) {
     if (!cachedFocus.length) {
       faceEnhance = { method: 'local', faces: 0, fallback: 'No face detected' }
@@ -402,19 +438,23 @@ async function buildEnhancedImage(settings: EnhancementSettings): Promise<Enhanc
       try {
         self.postMessage({ type: 'status', message: `Enhancing ${cachedFocus.length} detected face${cachedFocus.length > 1 ? 's' : ''}…` })
         const enhanced = await aiEnhanceFaces(pixels, width, height, cachedFocus, (done, total) => {
-          self.postMessage({ type: 'status', message: `AI face enhancement… ${progressPercent(done, total)}%` })
+          if (isCurrent()) self.postMessage({ type: 'status', message: `AI face enhancement… ${progressPercent(done, total)}%` })
         })
+        assertEnhancementCurrent(revision)
         pixels = enhanced.rgba
         faceEnhance = { method: 'ai', faces: enhanced.faces }
       } catch (error) {
+        assertEnhancementCurrent(revision)
         console.warn('AI face enhancement unavailable; keeping local face enhancement.', error)
         faceEnhance = { method: 'local', faces: cachedFocus.length, fallback: error instanceof Error ? error.message : String(error) }
       }
     }
   }
 
+  assertEnhancementCurrent(revision)
   if (settings.upscale2x) {
-    const scaled = await upscaleRgba(pixels, width, height)
+    const scaled = await upscaleRgba(pixels, width, height, isCurrent)
+    assertEnhancementCurrent(revision)
     pixels = scaled.rgba
     width = scaled.width
     height = scaled.height
@@ -427,6 +467,7 @@ async function buildEnhancedImage(settings: EnhancementSettings): Promise<Enhanc
     }
   }
 
+  assertEnhancementCurrent(revision)
   return { rgba: pixels, width, height, upscale, restoration, faceEnhance }
 }
 
@@ -436,7 +477,14 @@ async function applyEnhancement(settings: EnhancementSettings, auto = false) {
   generationRevision += 1
   const requested = { ...DEFAULT_ENHANCEMENT, ...settings }
   self.postMessage({ type: 'status', message: auto ? 'Applying Auto Enhance…' : 'Applying global enhancement…' })
-  const built = await buildEnhancedImage(requested)
+
+  let built: EnhancedImage
+  try {
+    built = await buildEnhancedImage(requested, revision)
+  } catch (error) {
+    if (error instanceof EnhancementCancelled || revision !== enhancementRevision) return false
+    throw error
+  }
   if (revision !== enhancementRevision) return false
 
   enhancementSettings = requested
@@ -576,6 +624,7 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
     self.postMessage({ type: 'enhancement-settings', settings: enhancementSettings, auto: false })
     self.postMessage({ type: 'ready' })
   } catch (error) {
+    if (error instanceof EnhancementCancelled) return
     self.postMessage({ type: 'error', scope, message: error instanceof Error ? error.message : String(error) })
   }
 }
