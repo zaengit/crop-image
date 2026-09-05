@@ -215,6 +215,49 @@ async function detectObjectSubject(rgba: Uint8ClampedArray, width: number, heigh
   return bestPerson?.region ?? bestObject?.region
 }
 
+async function detectFacesInsidePerson(
+  rgba: Uint8ClampedArray,
+  width: number,
+  height: number,
+  person: FocusRegion,
+): Promise<FocusRegion[]> {
+  if (person.label !== 'person') return []
+
+  const padX = person.width * 0.14
+  const padTop = person.height * 0.08
+  const cropX = Math.max(0, person.x - padX)
+  const cropY = Math.max(0, person.y - padTop)
+  const cropRight = Math.min(1, person.x + person.width + padX)
+  const cropBottom = Math.min(1, person.y + person.height * 0.72)
+  const cropWidth = cropRight - cropX
+  const cropHeight = cropBottom - cropY
+  if (cropWidth <= 0 || cropHeight <= 0) return []
+
+  const sx = Math.max(0, Math.floor(cropX * width))
+  const sy = Math.max(0, Math.floor(cropY * height))
+  const sw = Math.max(1, Math.min(width - sx, Math.ceil(cropWidth * width)))
+  const sh = Math.max(1, Math.min(height - sy, Math.ceil(cropHeight * height)))
+  const source = sourceCanvas(rgba, width, height)
+  if (!source) return []
+
+  const crop = new OffscreenCanvas(sw, sh)
+  const ctx = crop.getContext('2d', { willReadFrequently: true })
+  if (!ctx) return []
+  ctx.drawImage(source, sx, sy, sw, sh, 0, 0, sw, sh)
+  const pixels = ctx.getImageData(0, 0, sw, sh).data
+  const faces = await detectFaceRegions(new Uint8ClampedArray(pixels), sw, sh)
+
+  return faces.map((face) => ({
+    ...face,
+    x: cropX + face.x * cropWidth,
+    y: cropY + face.y * cropHeight,
+    width: face.width * cropWidth,
+    height: face.height * cropHeight,
+    kind: 'face' as const,
+    label: 'face',
+  }))
+}
+
 export async function detectFaces(rgba: Uint8ClampedArray, width: number, height: number): Promise<FocusRegion[]> {
   let weakFace: FocusRegion | undefined
 
@@ -229,6 +272,14 @@ export async function detectFaces(rgba: Uint8ClampedArray, width: number, height
 
   try {
     const subject = await detectObjectSubject(rgba, width, height)
+    if (subject?.label === 'person') {
+      try {
+        const personFaces = await detectFacesInsidePerson(rgba, width, height, subject)
+        if (personFaces.length) return personFaces
+      } catch (error) {
+        console.warn('Second-pass face detection inside person region failed.', error)
+      }
+    }
     if (subject) return [subject]
   } catch (error) {
     console.warn('AI object focus fallback failed.', error)
