@@ -19,7 +19,7 @@ test('upload, focus change, and manual generate work in production build', async
     buffer: TEST_IMAGE,
   })
 
-  await expect(page.locator('#status')).toContainText('Ready', { timeout: 30_000 })
+  await expect(page.locator('#status')).toContainText('Ready — adjust the focal point', { timeout: 30_000 })
   await expect(page.locator('#focus-editor')).toBeVisible()
   await expect(page.locator('#focus-stage')).toBeVisible()
   await expect(page.locator('#grid .card')).toHaveCount(0)
