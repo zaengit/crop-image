@@ -9,7 +9,8 @@ export type FocusRegion = {
 
 const MODEL_WIDTH = 320
 const MODEL_HEIGHT = 240
-const SCORE_THRESHOLD = 0.72
+const SCORE_THRESHOLD = 0.6
+const FALLBACK_SCORE_THRESHOLD = 0.48
 const IOU_THRESHOLD = 0.3
 
 type OrtModule = typeof import('onnxruntime-web/wasm')
@@ -58,6 +59,14 @@ function nms(regions: FocusRegion[]) {
   return kept.slice(0, 8)
 }
 
+function validFaceBox(x1: number, y1: number, x2: number, y2: number) {
+  const width = x2 - x1
+  const height = y2 - y1
+  const area = width * height
+  const aspect = width / Math.max(0.0001, height)
+  return width > 0 && height > 0 && area >= 0.001 && area <= 0.75 && aspect >= 0.45 && aspect <= 2.2
+}
+
 export async function detectFaces(rgba: Uint8ClampedArray, width: number, height: number): Promise<FocusRegion[]> {
   const canvas = new OffscreenCanvas(MODEL_WIDTH, MODEL_HEIGHT)
   const ctx = canvas.getContext('2d', { willReadFrequently: true })
@@ -91,15 +100,32 @@ export async function detectFaces(rgba: Uint8ClampedArray, width: number, height
   const boxes = boxesTensor.data as Float32Array
   const count = Math.min(scores.length / 2, boxes.length / 4)
   const regions: FocusRegion[] = []
+  let fallback: FocusRegion | undefined
+
   for (let i = 0; i < count; i++) {
     const confidence = scores[i * 2 + 1]
-    if (confidence < SCORE_THRESHOLD) continue
+    if (confidence < FALLBACK_SCORE_THRESHOLD) continue
+
     const x1 = Math.max(0, Math.min(1, boxes[i * 4]))
     const y1 = Math.max(0, Math.min(1, boxes[i * 4 + 1]))
     const x2 = Math.max(0, Math.min(1, boxes[i * 4 + 2]))
     const y2 = Math.max(0, Math.min(1, boxes[i * 4 + 3]))
-    if (x2 <= x1 || y2 <= y1) continue
-    regions.push({ x: x1, y: y1, width: x2 - x1, height: y2 - y1, confidence, kind: 'face' })
+    if (!validFaceBox(x1, y1, x2, y2)) continue
+
+    const region: FocusRegion = {
+      x: x1,
+      y: y1,
+      width: x2 - x1,
+      height: y2 - y1,
+      confidence,
+      kind: 'face',
+    }
+
+    if (!fallback || confidence > fallback.confidence) fallback = region
+    if (confidence >= SCORE_THRESHOLD) regions.push(region)
   }
-  return nms(regions)
+
+  const detected = nms(regions)
+  if (detected.length) return detected
+  return fallback ? [fallback] : []
 }
