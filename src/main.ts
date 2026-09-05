@@ -1,6 +1,8 @@
 import './style.css'
+import './enhancement-bridge'
 import { zipSync, strToU8 } from 'fflate'
 import { initStoreAssets } from './store-assets'
+import { createCropWorker } from './worker-channel'
 import type { ImagePreset, PresetGroup } from './presets'
 
 const fileInput = document.querySelector<HTMLInputElement>('#file')!
@@ -58,7 +60,7 @@ let generated: Generated[] = []
 let activeWorker: Worker | undefined
 let originalUrl: string | undefined
 let dragging = false
-let regenTimer: number | undefined
+let focusTimer: number | undefined
 let currentFileName = 'crop-image'
 let activeMenu: PresetGroup = 'social'
 let customSequence = 0
@@ -67,6 +69,11 @@ let activeBackground = 'original'
 
 function currentFormat() { return formatSelect.value as OutputFormat }
 function currentQuality() { return Number(qualityInput.value) / 100 }
+
+function markOutputsStale(message: string) {
+  if (generated.length) downloadAll.disabled = true
+  status.textContent = message
+}
 
 function revokeResults() {
   for (const item of generated) URL.revokeObjectURL(item.url)
@@ -241,10 +248,10 @@ function scheduleFocus(x: number, y: number) {
   const nx = Math.min(1, Math.max(0, x))
   const ny = Math.min(1, Math.max(0, y))
   setTarget(nx, ny)
-  if (regenTimer) window.clearTimeout(regenTimer)
-  regenTimer = window.setTimeout(() => {
-    if (generated.length) downloadAll.disabled = true
+  if (focusTimer) window.clearTimeout(focusTimer)
+  focusTimer = window.setTimeout(() => {
     activeWorker?.postMessage({ type: 'focus', x: nx, y: ny })
+    markOutputsStale('Manual focus updated — click Generate crop to refresh outputs.')
   }, 180)
 }
 
@@ -261,16 +268,11 @@ function updateQualityUi() {
   qualityWrap.hidden = currentFormat() === 'png'
 }
 
-function regenerateWithSettings() {
+function updateOutputSettings() {
   updateQualityUi()
   if (!activeWorker) return
   activeWorker.postMessage({ type: 'settings', format: currentFormat(), quality: currentQuality() })
-  if (generated.length) {
-    downloadAll.disabled = true
-    status.textContent = 'Updating output settings…'
-  } else {
-    status.textContent = 'Output settings updated. Click Generate crop when ready.'
-  }
+  markOutputsStale('Output settings updated — click Generate crop to refresh outputs.')
 }
 
 function folderFor(group: PresetGroup) {
@@ -415,7 +417,7 @@ async function process(file: File) {
       status.textContent = 'Finding the subject…'
     }
 
-    const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })
+    const worker = createCropWorker(new URL('./worker.ts', import.meta.url))
     activeWorker = worker
 
     worker.onmessage = (event) => {
@@ -423,17 +425,23 @@ async function process(file: File) {
       if (message.type === 'status') status.textContent = message.message
       if (message.type === 'auto-focus-point') setTarget(message.x, message.y)
       if (message.type === 'ready') {
-        status.textContent = 'Ready — adjust the focal point, then click Generate crop.'
+        status.textContent = 'Ready — adjust the focal point if needed, then click Generate crop.'
         pick.disabled = false
         downloadAll.disabled = generated.length === 0
+      }
+      if (message.type === 'settings-ready') {
+        markOutputsStale('Output settings updated — click Generate crop to refresh outputs.')
+      }
+      if (message.type === 'focus-ready') {
+        markOutputsStale(message.manual
+          ? 'Manual focus updated — click Generate crop to refresh outputs.'
+          : 'Auto focus restored — click Generate crop to refresh outputs.')
       }
       if (message.type === 'background-ready') {
         backgroundStatus.textContent = message.value === 'original'
           ? 'Original background ready.'
           : 'Background ready. The person mask is cached for faster color changes.'
-        if (!generated.some((item) => item.preset.group === 'passport')) {
-          status.textContent = 'Background ready — click Generate crop to create passport photos.'
-        }
+        markOutputsStale('Background ready — click Generate crop to refresh passport photos.')
       }
       if (message.type === 'result') {
         const blob = new Blob([message.bytes], { type: message.mime })
@@ -514,9 +522,9 @@ generatePassport.addEventListener('click', () => {
 })
 
 downloadAll.addEventListener('click', downloadZip)
-formatSelect.addEventListener('change', regenerateWithSettings)
+formatSelect.addEventListener('change', updateOutputSettings)
 qualityInput.addEventListener('input', updateQualityUi)
-qualityInput.addEventListener('change', regenerateWithSettings)
+qualityInput.addEventListener('change', updateOutputSettings)
 menuButtons.forEach((button) => button.addEventListener('click', () => setMenu(button.dataset.menu as PresetGroup)))
 backgroundButtons.forEach((button) => button.addEventListener('click', () => requestBackground(button.dataset.background ?? 'original')))
 passportBackgroundColor.addEventListener('input', () => selectBackground(passportBackgroundColor.value))
@@ -578,10 +586,9 @@ focusStage.addEventListener('pointerup', (event) => {
 })
 focusStage.addEventListener('pointercancel', () => { dragging = false })
 resetFocus.addEventListener('click', () => {
-  if (regenTimer) window.clearTimeout(regenTimer)
-  if (generated.length) downloadAll.disabled = true
-  status.textContent = generated.length ? 'Restoring auto focus…' : 'Auto focus restored. Click Generate crop when ready.'
+  if (focusTimer) window.clearTimeout(focusTimer)
   activeWorker?.postMessage({ type: 'auto' })
+  markOutputsStale('Auto focus restored — click Generate crop to refresh outputs.')
 })
 focusImage.addEventListener('load', repositionTarget)
 window.addEventListener('resize', repositionTarget)
