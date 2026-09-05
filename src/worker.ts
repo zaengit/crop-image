@@ -52,6 +52,7 @@ let enhancementSettings: EnhancementSettings = { ...DEFAULT_ENHANCEMENT }
 let currentMode: Mode = { kind: 'auto' }
 let outputFormat: OutputFormat = 'jpeg'
 let outputQuality = 0.9
+let generationRevision = 0
 
 function ensureWasm() { wasmReady ??= initWasm(); return wasmReady }
 
@@ -232,7 +233,8 @@ function currentManualFocus() { return currentMode.kind === 'focus' ? { x: curre
 
 async function generatePresets(presets: ImagePreset[], manualFocus = currentManualFocus(), replace = false) {
   if (!cachedRgba) throw new Error('No image loaded')
-  if (!presets.length) return
+  if (!presets.length) return false
+  const revision = generationRevision
   const manualX = manualFocus ? manualFocus.x : -1
   const manualY = manualFocus ? manualFocus.y : -1
   self.postMessage({ type: 'status', message: manualFocus ? 'Applying manual focus…' : cachedFocus.length ? `Found ${cachedFocus.length} face${cachedFocus.length > 1 ? 's' : ''}. Cropping…` : 'Using smart crop…' })
@@ -243,8 +245,10 @@ async function generatePresets(presets: ImagePreset[], manualFocus = currentManu
     const wasmPixels = new Uint8Array(sourcePixels.buffer as ArrayBuffer, sourcePixels.byteOffset, sourcePixels.byteLength)
     const png = smart_crop_png(wasmPixels, cachedWidth, cachedHeight, preset.width, preset.height, JSON.stringify(cachedFocus), preset.safeTop ?? 0, preset.safeBottom ?? 0, preset.facePadding ?? 0.1, manualX, manualY)
     const encoded = await encodeOutput(png, preset.width, preset.height)
+    if (revision !== generationRevision) return false
     self.postMessage({ type: 'result', preset, bytes: encoded.bytes, mime: encoded.mime, extension: encoded.extension, index: i, total: presets.length, replace }, [encoded.bytes])
   }
+  return revision === generationRevision
 }
 
 async function rebuildEnhancedImage(settings: EnhancementSettings) {
@@ -355,51 +359,57 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
   try {
     await ensureWasm()
 
-    if (event.data.type === 'enhancement') { await applyEnhancement(event.data.settings); return }
+    if (event.data.type === 'enhancement') { generationRevision += 1; await applyEnhancement(event.data.settings); return }
     if (event.data.type === 'enhancement-auto') {
       if (!sourceRgba) throw new Error('Enhancement requires a loaded image')
+      generationRevision += 1
       await applyEnhancement(autoEnhancement(sourceRgba), true)
       return
     }
     if (event.data.type === 'settings') {
+      generationRevision += 1
       outputFormat = event.data.format
       outputQuality = Math.min(1, Math.max(0.1, event.data.quality))
       self.postMessage({ type: 'settings-ready', format: outputFormat, quality: outputQuality })
       return
     }
     if (event.data.type === 'focus') {
+      generationRevision += 1
       currentMode = { kind: 'focus', x: event.data.x, y: event.data.y }
       self.postMessage({ type: 'focus-ready', manual: true, x: event.data.x, y: event.data.y })
       return
     }
     if (event.data.type === 'auto') {
+      generationRevision += 1
       currentMode = { kind: 'auto' }
       postAutoFocusPoint()
       self.postMessage({ type: 'focus-ready', manual: false })
       return
     }
     if (event.data.type === 'social') {
-      await generatePresets(SOCIAL_PRESETS, currentManualFocus(), true)
-      self.postMessage({ type: 'done', manual: currentMode.kind === 'focus', format: outputFormat, quality: outputQuality })
+      const completed = await generatePresets(SOCIAL_PRESETS, currentManualFocus(), true)
+      if (completed) self.postMessage({ type: 'done', manual: currentMode.kind === 'focus', format: outputFormat, quality: outputQuality })
       return
     }
     if (event.data.type === 'passport') {
-      await generatePresets(PASSPORT_PRESETS, currentManualFocus(), true)
-      self.postMessage({ type: 'done', manual: currentMode.kind === 'focus', format: outputFormat, quality: outputQuality })
+      const completed = await generatePresets(PASSPORT_PRESETS, currentManualFocus(), true)
+      if (completed) self.postMessage({ type: 'done', manual: currentMode.kind === 'focus', format: outputFormat, quality: outputQuality })
       return
     }
     if (event.data.type === 'background') {
+      generationRevision += 1
       await composePassportBackground(event.data.value)
       self.postMessage({ type: 'background-ready', value: passportBackground })
       return
     }
     if (event.data.type === 'custom') {
-      await generatePresets([event.data.preset], currentManualFocus())
-      self.postMessage({ type: 'done', manual: currentMode.kind === 'focus', format: outputFormat, quality: outputQuality })
+      const completed = await generatePresets([event.data.preset], currentManualFocus())
+      if (completed) self.postMessage({ type: 'done', manual: currentMode.kind === 'focus', format: outputFormat, quality: outputQuality })
       return
     }
     if (event.data.type === 'remove-custom') return
 
+    generationRevision += 1
     outputFormat = event.data.format ?? outputFormat
     outputQuality = Math.min(1, Math.max(0.1, event.data.quality ?? outputQuality))
     sourceWidth = event.data.width
