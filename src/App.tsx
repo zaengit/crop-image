@@ -193,8 +193,51 @@ export function App() {
             <section id="custom-panel" className="mt-5 rounded-2xl border border-neutral-200 bg-neutral-50 p-4 sm:p-5">
               <div>
                 <h3 className="text-lg font-semibold">Custom size</h3>
-                <p className="text-sm leading-6 text-neutral-600">Create any pixel size while keeping smart crop and your current focal point.</p>
+                <p className="text-sm leading-6 text-neutral-600">Create any pixel size while keeping smart crop, your current focal point, and optional background erase.</p>
               </div>
+
+              <div className="mt-4 grid gap-3 lg:grid-cols-[220px_1fr]">
+                <div>
+                  <strong>Erase background</strong>
+                  <p className="text-sm leading-6 text-neutral-600">Keep the original image or remove the background and replace it with a solid color.</p>
+                </div>
+                <div>
+                  <div className="flex flex-wrap gap-2" role="group" aria-label="Custom size background">
+                    {[
+                      ['original', 'Original'],
+                      ['#ffffff', 'White'],
+                      ['#d71920', 'Red'],
+                      ['#1769d2', 'Blue'],
+                    ].map(([value, label]) => (
+                      <button
+                        key={value}
+                        className={`rounded-full border px-3 py-2 text-sm transition ${engine.background === value ? 'border-neutral-950 bg-neutral-950 text-white' : 'border-neutral-300 bg-white text-neutral-700 hover:border-neutral-950'}`}
+                        type="button"
+                        data-custom-background={value}
+                        aria-pressed={engine.background === value}
+                        onClick={() => engine.setBackground(value)}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                    <ColorPicker
+                      id="custom-background-color"
+                      label="Custom background"
+                      value={engine.background}
+                      fallback="#e5e7eb"
+                      presets={[
+                        { label: 'White', value: '#ffffff' },
+                        { label: 'Black', value: '#000000' },
+                        { label: 'Red', value: '#d71920' },
+                        { label: 'Blue', value: '#1769d2' },
+                      ]}
+                      onChange={(value) => engine.setBackground(value)}
+                    />
+                  </div>
+                  <small className="mt-2 block text-sm text-neutral-600" aria-live="polite">{engine.backgroundStatus}</small>
+                </div>
+              </div>
+
               <form id="custom-form" className="mt-4 grid gap-3 md:grid-cols-[1fr_1fr_auto]" onSubmit={submitCustom}>
                 <label className="grid gap-1 text-sm">
                   <span>Width</span>
