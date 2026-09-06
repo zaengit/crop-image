@@ -73,11 +73,15 @@ jobs:
 
       - name: Verify production worker artifact
         run: |
-          test -n "$(find dist/assets -maxdepth 1 -name 'worker-*.js' -print -quit)"
+          worker="$(find dist/assets -maxdepth 1 -name 'worker-*.js' -print -quit)"
+          test -n "$worker"
           test -z "$(find dist -name 'worker-*.ts' -print -quit)"
-          test -f dist/mediapipe-wasm/vision_wasm_internal.wasm || test -f dist/mediapipe-wasm/vision_wasm_nosimd_internal.wasm
+          test ! -d dist/mediapipe-wasm
+          test -f dist/models/modnet_photographic_portrait_matting.onnx
           test -n "$(find dist/ort-wasm -maxdepth 1 -name 'ort-wasm*.mjs' -print -quit)"
           test -n "$(find dist/ort-wasm -maxdepth 1 -name 'ort-wasm*.wasm' -print -quit)"
+          ! grep -q 'ModuleFactory' "$worker"
+          ! grep -q 'selfie_segmenter.tflite' "$worker"
 
       - name: Install Chromium for smoke test
         run: npx playwright install --with-deps chromium
