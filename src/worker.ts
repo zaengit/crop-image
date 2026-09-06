@@ -93,7 +93,7 @@ function ensureSegmenter() {
     const { FilesetResolver, ImageSegmenter } = await import('@mediapipe/tasks-vision')
     const wasmPath = new URL(`${import.meta.env.BASE_URL}mediapipe-wasm`, self.location.origin).href.replace(/\/$/, '')
     const resolveVision = FilesetResolver.forVisionTasks as unknown as (path: string, useModuleLoader?: boolean) => Promise<{ wasmLoaderPath: string; [key: string]: unknown }>
-    const fileset = await resolveVision(wasmPath, true)
+    const fileset = await resolveVision(wasmPath, false)
     const modelUrl = new URL(`${import.meta.env.BASE_URL}models/selfie_segmenter.tflite`, self.location.origin).href
     const modelResponse = await fetch(modelUrl)
     if (!modelResponse.ok) throw new Error(`Unable to load background model (${modelResponse.status})`)
@@ -143,6 +143,131 @@ function parseHexColor(value: string) {
   const hex = value.replace('#', '')
   if (!/^[0-9a-fA-F]{6}$/.test(hex)) throw new Error('Invalid background color')
   return { r: Number.parseInt(hex.slice(0, 2), 16), g: Number.parseInt(hex.slice(2, 4), 16), b: Number.parseInt(hex.slice(4, 6), 16) }
+}
+
+function smoothstep(edge0: number, edge1: number, value: number) {
+  const t = Math.min(1, Math.max(0, (value - edge0) / Math.max(1e-6, edge1 - edge0)))
+  return t * t * (3 - 2 * t)
+}
+
+function refinePersonMask(mask: Float32Array, rgba: Uint8ClampedArray, width: number, height: number) {
+  const refined = new Float32Array(mask.length)
+  const closed = new Float32Array(mask.length)
+  const spatialWeights = [0.7, 1, 0.7, 1, 1.6, 1, 0.7, 1, 0.7]
+
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const index = y * width + x
+      const p = index * 4
+      const r = rgba[p]
+      const g = rgba[p + 1]
+      const b = rgba[p + 2]
+      let weightedMask = 0
+      let totalWeight = 0
+      let weightIndex = 0
+
+      for (let oy = -1; oy <= 1; oy++) {
+        const ny = Math.min(height - 1, Math.max(0, y + oy))
+        for (let ox = -1; ox <= 1; ox++, weightIndex++) {
+          const nx = Math.min(width - 1, Math.max(0, x + ox))
+          const neighbor = ny * width + nx
+          const np = neighbor * 4
+          const colorDistance = Math.abs(rgba[np] - r) + Math.abs(rgba[np + 1] - g) + Math.abs(rgba[np + 2] - b)
+          const edgeWeight = 1 / (1 + colorDistance / 54)
+          const weight = spatialWeights[weightIndex] * edgeWeight
+          weightedMask += mask[neighbor] * weight
+          totalWeight += weight
+        }
+      }
+
+      const guided = totalWeight > 0 ? weightedMask / totalWeight : mask[index]
+      refined[index] = smoothstep(0.12, 0.86, guided)
+    }
+  }
+
+  // Close pinholes and tiny gaps inside otherwise confident foreground while
+  // keeping genuine hair/background transitions soft.
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const index = y * width + x
+      const center = refined[index]
+      if (center >= 0.72) {
+        closed[index] = center
+        continue
+      }
+
+      let confidentNeighbors = 0
+      let neighborSum = 0
+      let neighborCount = 0
+      for (let oy = -1; oy <= 1; oy++) {
+        const ny = y + oy
+        if (ny < 0 || ny >= height) continue
+        for (let ox = -1; ox <= 1; ox++) {
+          if (ox === 0 && oy === 0) continue
+          const nx = x + ox
+          if (nx < 0 || nx >= width) continue
+          const value = refined[ny * width + nx]
+          if (value > 0.72) confidentNeighbors++
+          neighborSum += value
+          neighborCount++
+        }
+      }
+
+      if (confidentNeighbors >= 6 && neighborCount > 0) {
+        closed[index] = Math.max(center, neighborSum / neighborCount * 0.92)
+      } else {
+        closed[index] = center
+      }
+    }
+  }
+
+  // Final adaptive feather: confident foreground becomes solid quickly, while
+  // uncertain edge pixels keep enough fractional alpha for fine hair.
+  for (let i = 0; i < closed.length; i++) {
+    const value = closed[i]
+    refined[i] = value >= 0.92 ? 1 : value <= 0.035 ? 0 : smoothstep(0.05, 0.9, value)
+  }
+
+  return refined
+}
+
+function decontaminateEdgePixel(
+  rgba: Uint8ClampedArray,
+  mask: Float32Array,
+  width: number,
+  height: number,
+  x: number,
+  y: number,
+) {
+  const index = y * width + x
+  const alpha = mask[index]
+  const p = index * 4
+  if (alpha <= 0.03 || alpha >= 0.97) return { r: rgba[p], g: rgba[p + 1], b: rgba[p + 2] }
+
+  let bestIndex = index
+  let bestAlpha = alpha
+  for (let oy = -1; oy <= 1; oy++) {
+    const ny = y + oy
+    if (ny < 0 || ny >= height) continue
+    for (let ox = -1; ox <= 1; ox++) {
+      const nx = x + ox
+      if (nx < 0 || nx >= width) continue
+      const candidate = ny * width + nx
+      if (mask[candidate] > bestAlpha) {
+        bestAlpha = mask[candidate]
+        bestIndex = candidate
+      }
+    }
+  }
+
+  if (bestIndex === index || bestAlpha < alpha + 0.08) return { r: rgba[p], g: rgba[p + 1], b: rgba[p + 2] }
+  const bp = bestIndex * 4
+  const amount = Math.min(0.38, (bestAlpha - alpha) * 0.55)
+  return {
+    r: Math.round(rgba[p] * (1 - amount) + rgba[bp] * amount),
+    g: Math.round(rgba[p + 1] * (1 - amount) + rgba[bp + 1] * amount),
+    b: Math.round(rgba[p + 2] * (1 - amount) + rgba[bp + 2] * amount),
+  }
 }
 
 function upscaleDimensions(width: number, height: number) {
@@ -228,7 +353,9 @@ async function ensurePersonMask() {
   try {
     const mask = result.confidenceMasks?.[0]
     if (!mask) throw new Error('Person segmentation did not return a confidence mask')
-    cachedPersonMask = new Float32Array(mask.getAsFloat32Array())
+    const rawMask = new Float32Array(mask.getAsFloat32Array())
+    self.postMessage({ type: 'status', message: 'Refining hair and subject edges…' })
+    cachedPersonMask = refinePersonMask(rawMask, cachedRgba, cachedWidth, cachedHeight)
     return cachedPersonMask
   } finally {
     result.close()
@@ -247,14 +374,18 @@ async function composePassportBackground(background: string, revision = ++backgr
   if (revision !== backgroundRevision || background !== passportBackground) return false
   if (mask.length !== cachedWidth * cachedHeight) throw new Error('Unexpected segmentation mask size')
   const output = new Uint8ClampedArray(cachedRgba.length)
-  for (let i = 0; i < mask.length; i++) {
-    const alpha = Math.min(1, Math.max(0, mask[i]))
-    const inv = 1 - alpha
-    const p = i * 4
-    output[p] = Math.round(cachedRgba[p] * alpha + color.r * inv)
-    output[p + 1] = Math.round(cachedRgba[p + 1] * alpha + color.g * inv)
-    output[p + 2] = Math.round(cachedRgba[p + 2] * alpha + color.b * inv)
-    output[p + 3] = 255
+  for (let y = 0; y < cachedHeight; y++) {
+    for (let x = 0; x < cachedWidth; x++) {
+      const i = y * cachedWidth + x
+      const alpha = Math.min(1, Math.max(0, mask[i]))
+      const inv = 1 - alpha
+      const p = i * 4
+      const foreground = decontaminateEdgePixel(cachedRgba, mask, cachedWidth, cachedHeight, x, y)
+      output[p] = Math.round(foreground.r * alpha + color.r * inv)
+      output[p + 1] = Math.round(foreground.g * alpha + color.g * inv)
+      output[p + 2] = Math.round(foreground.b * alpha + color.b * inv)
+      output[p + 3] = 255
+    }
   }
   if (revision !== backgroundRevision || background !== passportBackground) return false
   passportRgba = output
@@ -426,7 +557,7 @@ async function buildEnhancedImage(settings: EnhancementSettings, revision: numbe
       console.warn('AI restoration unavailable; using local denoise/deblur fallback.', error)
       self.postMessage({ type: 'status', message: 'AI restoration unavailable. Using local fallback…' })
       pixels = enhanceRgba(sourceRgba, sourceWidth, sourceHeight, settings, cachedFocus)
-    	  restoration = { method: 'local', fallback: error instanceof Error ? error.message : String(error) }
+      restoration = { method: 'local', fallback: error instanceof Error ? error.message : String(error) }
     }
   }
 
