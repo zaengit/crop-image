@@ -76,6 +76,8 @@ jobs:
           test -n "$(find dist/assets -maxdepth 1 -name 'worker-*.js' -print -quit)"
           test -z "$(find dist -name 'worker-*.ts' -print -quit)"
           test -f dist/mediapipe-wasm/vision_wasm_internal.wasm || test -f dist/mediapipe-wasm/vision_wasm_nosimd_internal.wasm
+          test -n "$(find dist/ort-wasm -maxdepth 1 -name 'ort-wasm*.mjs' -print -quit)"
+          test -n "$(find dist/ort-wasm -maxdepth 1 -name 'ort-wasm*.wasm' -print -quit)"
 
       - name: Install Chromium for smoke test
         run: npx playwright install --with-deps chromium
