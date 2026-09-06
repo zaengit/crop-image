@@ -225,6 +225,14 @@ test('dark/light color mode toggles and persists', async ({ page }) => {
   await expect(toggle).toHaveAttribute('aria-label', 'Switch to light mode')
   await expect(toggle).toHaveAttribute('aria-pressed', 'true')
 
+  const darkColors = await page.evaluate(() => ({
+    body: getComputedStyle(document.body).backgroundColor,
+    panel: getComputedStyle(document.querySelector('#results')!).backgroundColor,
+  }))
+  expect(darkColors.body).toBe('rgb(16, 16, 16)')
+  expect(darkColors.panel).toBe('rgb(27, 27, 27)')
+
+
   await page.reload()
   await expect(html).toHaveAttribute('data-theme', 'dark')
 
