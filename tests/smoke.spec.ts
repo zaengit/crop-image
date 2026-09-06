@@ -11,17 +11,6 @@ const TEST_IMAGE = Buffer.from(`
 
 const PORTRAIT_URL = 'https://gitlab.com/scikit-image/data/-/raw/master/astronaut.png'
 
-function buildDoublePortraitSvg(portrait: Buffer) {
-  const dataUrl = `data:image/png;base64,${portrait.toString('base64')}`
-  return Buffer.from(`
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="512" viewBox="0 0 1024 512">
-  <rect width="1024" height="512" fill="#ffffff"/>
-  <image href="${dataUrl}" x="0" y="0" width="512" height="512"/>
-  <image href="${dataUrl}" x="512" y="0" width="512" height="512"/>
-</svg>
-`)
-}
-
 test('upload, focus change, and manual generate work in production build', async ({ page }) => {
   const browserErrors: string[] = []
   page.on('pageerror', (error) => {
@@ -131,15 +120,35 @@ test('Face Enhance processes both detected faces', async ({ page, request }) => 
   const portraitResponse = await request.get(PORTRAIT_URL)
   expect(portraitResponse.ok(), `portrait fixture request failed: ${portraitResponse.status()}`).toBeTruthy()
   const portrait = await portraitResponse.body()
-  const doublePortrait = buildDoublePortraitSvg(portrait)
 
   await page.setViewportSize({ width: 1280, height: 900 })
   await page.goto('http://127.0.0.1:4173/crop-image/')
   await expect(page.locator('html')).toHaveAttribute('data-app-ready', 'true', { timeout: 10_000 })
 
+  const doublePortraitBase64 = await page.evaluate(async (portraitBase64) => {
+    const image = new Image()
+    image.src = `data:image/png;base64,${portraitBase64}`
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve()
+      image.onerror = () => reject(new Error('Unable to decode portrait fixture'))
+    })
+
+    const canvas = document.createElement('canvas')
+    canvas.width = 1024
+    canvas.height = 512
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('Unable to create multi-face fixture canvas')
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.drawImage(image, 0, 0, 512, 512)
+    ctx.drawImage(image, 512, 0, 512, 512)
+    return canvas.toDataURL('image/png').split(',')[1]
+  }, portrait.toString('base64'))
+  const doublePortrait = Buffer.from(doublePortraitBase64, 'base64')
+
   await page.locator('#file').setInputFiles({
-    name: 'double-astronaut.svg',
-    mimeType: 'image/svg+xml',
+    name: 'double-astronaut.png',
+    mimeType: 'image/png',
     buffer: doublePortrait,
   })
 
