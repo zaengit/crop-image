@@ -7,7 +7,7 @@ function publish(worker: Worker | undefined) {
 }
 
 export function createCropWorker() {
-  const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })
+  const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'classic' })
   publish(worker)
 
   // Reuse the passport background-removal path for custom crops without
@@ -52,7 +52,7 @@ export function createCropWorker() {
   return worker
 }
 
-export function onCropWorker(listener: (worker: Worker | undefined) => void) {
+export function onCropWorker(listener: (worker: Worker | undefined) => void>() {
   listeners.add(listener)
   listener(currentWorker)
   return () => listeners.delete(listener)
