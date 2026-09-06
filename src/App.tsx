@@ -77,20 +77,6 @@ export function App() {
   return (
     <main className="app-shell min-h-screen bg-[#f4f4f2] px-4 py-4 text-neutral-950 sm:px-6 sm:py-6 lg:px-8">
       <div className="mx-auto max-w-[1440px] space-y-6">
-        <header className="app-header flex items-center justify-between gap-4 rounded-2xl border border-neutral-900 bg-neutral-950 px-4 py-3 text-white shadow-[0_18px_45px_rgba(0,0,0,0.12)] sm:px-5">
-          <div className="flex min-w-0 items-center gap-3">
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-sm font-black tracking-[-0.08em] text-neutral-950">CI</span>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold tracking-tight">Crop Image</p>
-              <p className="hidden text-[11px] text-neutral-400 sm:block">Smart crop studio</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-neutral-400">
-            <span className="h-1.5 w-1.5 rounded-full bg-white" aria-hidden="true" />
-            <span>Local processing</span>
-          </div>
-        </header>
-
         <UploadDropzone busy={engine.busy} status={engine.status} onFile={processFile} />
 
         <EnhancementPanel
