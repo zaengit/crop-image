@@ -75,6 +75,11 @@ input[type="color"] {
   background-size: 24px 24px;
 }
 
+#store-screenshots .store-grid-2:not(:has(#store-screenshot-list > *)) > .store-settings,
+#store-icon .store-grid-2:not(:has(.icon-preview-pair)) > .store-settings {
+  display: none;
+}
+
 ::selection {
   background: #0a0a0a;
   color: #fff;
