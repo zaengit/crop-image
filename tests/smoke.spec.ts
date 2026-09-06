@@ -11,6 +11,17 @@ const TEST_IMAGE = Buffer.from(`
 
 const PORTRAIT_URL = 'https://gitlab.com/scikit-image/data/-/raw/master/astronaut.png'
 
+function buildDoublePortraitSvg(portrait: Buffer) {
+  const dataUrl = `data:image/png;base64,${portrait.toString('base64')}`
+  return Buffer.from(`
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="512" viewBox="0 0 1024 512">
+  <rect width="1024" height="512" fill="#ffffff"/>
+  <image href="${dataUrl}" x="0" y="0" width="512" height="512"/>
+  <image href="${dataUrl}" x="512" y="0" width="512" height="512"/>
+</svg>
+`)
+}
+
 test('upload, focus change, and manual generate work in production build', async ({ page }) => {
   const browserErrors: string[] = []
   page.on('pageerror', (error) => {
@@ -106,4 +117,40 @@ test('auto focus targets a clear face and Face Enhance reports at least one face
   await expect(enhancementStatus).toContainText(/(?:AI Face Enhance \([1-9]\d*\) ready|local face fallback ready)/, { timeout: 120_000 })
   const finalStatus = await enhancementStatus.innerText()
   expect(finalStatus).toMatch(/AI Face Enhance \([1-9]\d*\) ready/)
+})
+
+test('Face Enhance processes both detected faces', async ({ page, request }) => {
+  test.setTimeout(240_000)
+  page.on('console', (message) => {
+    if (message.type() === 'warning' || message.type() === 'error') {
+      console.error(`MULTI FACE TEST BROWSER ${message.type().toUpperCase()}: ${message.text()}`)
+    }
+  })
+  page.on('pageerror', (error) => console.error(`MULTI FACE TEST PAGEERROR: ${error.stack ?? error.message}`))
+
+  const portraitResponse = await request.get(PORTRAIT_URL)
+  expect(portraitResponse.ok(), `portrait fixture request failed: ${portraitResponse.status()}`).toBeTruthy()
+  const portrait = await portraitResponse.body()
+  const doublePortrait = buildDoublePortraitSvg(portrait)
+
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('http://127.0.0.1:4173/crop-image/')
+  await expect(page.locator('html')).toHaveAttribute('data-app-ready', 'true', { timeout: 10_000 })
+
+  await page.locator('#file').setInputFiles({
+    name: 'double-astronaut.svg',
+    mimeType: 'image/svg+xml',
+    buffer: doublePortrait,
+  })
+
+  await expect(page.locator('#status')).toContainText('Ready — adjust the focal point', { timeout: 60_000 })
+  await expect(page.locator('#reset-focus')).toHaveAttribute('aria-pressed', 'true')
+
+  await page.locator('#enhance-manual').click()
+  await page.getByRole('button', { name: 'Face enhance' }).click()
+
+  const enhancementStatus = page.locator('#enhance-status')
+  await expect(enhancementStatus).toContainText(/(?:AI Face Enhance \(2\) ready|local face fallback ready)/, { timeout: 180_000 })
+  const finalStatus = await enhancementStatus.innerText()
+  expect(finalStatus).toMatch(/AI Face Enhance \(2\) ready/)
 })
