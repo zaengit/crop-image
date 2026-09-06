@@ -244,7 +244,7 @@ export function StoreAssetsPanel() {
                 <div><h4 className="font-semibold text-slate-950">Screenshots</h4><p className="text-sm text-slate-600">Upload up to 10 screenshots. Drag to reorder before generating.</p></div>
                 <button id="store-pick-screenshots" className="secondary-button compact min-h-10 rounded-lg border border-neutral-300 bg-white px-3 py-2 text-xs text-neutral-700 transition hover:border-neutral-950 hover:text-neutral-950" type="button" onClick={() => screenshotInputRef.current?.click()}>Add screenshots</button>
               </div>
-              <input ref={screenshotInputRef} id="store-screenshot-input" type="file" accept="image/*" multiple hidden onChange={(event: any) => { const files = event.currentTarget.files; event.currentTarget.value = ''; if (files) void addScreenshotFiles(files) }} />
+              <input ref={screenshotInputRef} id="store-screenshot-input" type="file" accept="image/*" multiple hidden onChange={(event: any) => { const files = Array.from(event.currentTarget.files ?? []) as File[]; event.currentTarget.value = ''; if (files.length) void addScreenshotFiles(files) }} />
               <div id="store-screenshot-drop" className="mini-dropzone mt-4 rounded-xl border border-dashed border-slate-300 p-5 text-center text-sm text-slate-500" onDragOver={(event: any) => event.preventDefault()} onDrop={(event: any) => { event.preventDefault(); if (event.dataTransfer?.files) void addScreenshotFiles(event.dataTransfer.files) }}>Drop screenshots here</div>
               <div id="store-screenshot-list" className="source-list mt-4 space-y-2">
                 {sources.map((source, index) => (
