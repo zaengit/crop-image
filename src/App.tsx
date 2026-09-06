@@ -20,6 +20,7 @@ export function App() {
   const [customHeight, setCustomHeight] = useState(1080)
   const [lockRatio, setLockRatio] = useState(false)
   const [lockedRatio, setLockedRatio] = useState(1)
+  const [selectedRatio, setSelectedRatio] = useState<string | null>(null)
   const [customError, setCustomError] = useState('')
 
   useEffect(() => {
@@ -41,13 +42,16 @@ export function App() {
     void engine.processFile(file)
   }
 
-  const setRatio = (ratio: number) => {
+  const setRatio = (w: number, h: number) => {
+    const ratio = w / h
+    setSelectedRatio(`${w}/${h}`)
     setLockedRatio(ratio)
     setLockRatio(true)
     setCustomHeight(Math.max(64, Math.min(8192, Math.round(customWidth / ratio))))
   }
 
   const updateWidth = (value: number) => {
+    setSelectedRatio(null)
     setCustomWidth(value)
     if (lockRatio && lockedRatio) {
       setCustomHeight(Math.max(64, Math.min(8192, Math.round(value / lockedRatio))))
@@ -55,6 +59,7 @@ export function App() {
   }
 
   const updateHeight = (value: number) => {
+    setSelectedRatio(null)
     setCustomHeight(value)
     if (lockRatio && lockedRatio) {
       setCustomWidth(Math.max(64, Math.min(8192, Math.round(value * lockedRatio))))
@@ -69,6 +74,7 @@ export function App() {
   const toggleRatioLock = (event: ChangeEvent<HTMLInputElement>) => {
     const checked = event.currentTarget.checked
     setLockRatio(checked)
+    if (!checked) setSelectedRatio(null)
     if (checked) setLockedRatio(customWidth / Math.max(1, customHeight))
   }
 
@@ -195,10 +201,23 @@ export function App() {
                   <input id="lock-ratio" className="accent-neutral-950" type="checkbox" checked={lockRatio} onChange={toggleRatioLock} />
                   <span>Lock aspect ratio</span>
                 </label>
-                <div className="flex flex-wrap gap-2 md:col-span-3" aria-label="Quick aspect ratios">
-                  {[[1, 1], [4, 5], [9, 16], [16, 9], [2, 3], [3, 4]].map(([w, h]) => (
-                    <button key={`${w}/${h}`} type="button" data-ratio={`${w}/${h}`} className="rounded-lg border border-neutral-300 bg-white px-3 py-2 text-xs font-medium text-neutral-700 transition hover:border-neutral-950 hover:text-neutral-950" onClick={() => setRatio(w / h)}>{w}:{h}</button>
-                  ))}
+                <div className="flex flex-wrap gap-2 md:col-span-3" role="group" aria-label="Quick aspect ratios">
+                  {[[1, 1], [4, 5], [9, 16], [16, 9], [2, 3], [3, 4]].map(([w, h]) => {
+                    const ratioKey = `${w}/${h}`
+                    const isActive = selectedRatio === ratioKey
+                    return (
+                      <button
+                        key={ratioKey}
+                        type="button"
+                        data-ratio={ratioKey}
+                        aria-pressed={isActive}
+                        className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${isActive ? 'border-neutral-950 bg-neutral-950 text-white' : 'border-neutral-300 bg-white text-neutral-700 hover:border-neutral-950 hover:text-neutral-950'}`}
+                        onClick={() => setRatio(w, h)}
+                      >
+                        {w}:{h}
+                      </button>
+                    )
+                  })}
                 </div>
                 <button className="primary-button rounded-xl bg-neutral-950 px-4 py-2.5 font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 md:col-span-3 md:w-fit" type="submit" disabled={generateDisabled}>Generate custom size</button>
                 <small id="custom-error" className="text-sm text-rose-700 md:col-span-3" aria-live="polite">{customError}</small>
