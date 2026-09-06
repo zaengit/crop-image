@@ -32,6 +32,7 @@ export function App() {
   }, [engine.enhancement])
 
   const visibleResults = engine.generated.filter((item: Generated) => item.preset.group === menu)
+  const generateDisabled = engine.busy || !engine.hasImage
 
   const processFile = (file: File | undefined) => {
     if (!file) return
@@ -131,7 +132,7 @@ export function App() {
                   <h3 className="text-lg font-semibold">Social media</h3>
                   <p className="text-sm leading-6 text-neutral-600">Adjust the focal point if needed, then generate ready-to-use social media sizes.</p>
                 </div>
-                <button id="generate-social" className="primary-button rounded-xl bg-neutral-950 px-4 py-2.5 font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40" type="button" disabled={engine.busy} onClick={() => engine.generateGroup('social')}>Generate crop</button>
+                <button id="generate-social" className="primary-button rounded-xl bg-neutral-950 px-4 py-2.5 font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40" type="button" disabled={generateDisabled} onClick={() => engine.generateGroup('social')}>Generate crop</button>
               </div>
             </section>
           ) : null}
@@ -143,7 +144,7 @@ export function App() {
                   <h3 className="text-lg font-semibold">Passport photo</h3>
                   <p className="text-sm leading-6 text-neutral-600">Choose the background and generate portrait-focused 2 × 3, 3 × 4, and 4 × 6 outputs.</p>
                 </div>
-                <button id="generate-passport" className="primary-button rounded-xl bg-neutral-950 px-4 py-2.5 font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40" type="button" disabled={engine.busy} onClick={() => engine.generateGroup('passport')}>Generate crop</button>
+                <button id="generate-passport" className="primary-button rounded-xl bg-neutral-950 px-4 py-2.5 font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40" type="button" disabled={generateDisabled} onClick={() => engine.generateGroup('passport')}>Generate crop</button>
               </div>
               <div className="mt-4 grid gap-3 lg:grid-cols-[220px_1fr]">
                 <div>
@@ -213,7 +214,7 @@ export function App() {
                     <button key={`${w}/${h}`} type="button" data-ratio={`${w}/${h}`} className="rounded-lg border border-neutral-300 bg-white px-3 py-2 text-xs font-medium text-neutral-700 transition hover:border-neutral-950 hover:text-neutral-950" onClick={() => setRatio(w / h)}>{w}:{h}</button>
                   ))}
                 </div>
-                <button className="primary-button rounded-xl bg-neutral-950 px-4 py-2.5 font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 md:col-span-3 md:w-fit" type="submit" disabled={engine.busy}>Generate custom size</button>
+                <button className="primary-button rounded-xl bg-neutral-950 px-4 py-2.5 font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 md:col-span-3 md:w-fit" type="submit" disabled={generateDisabled}>Generate custom size</button>
                 <small id="custom-error" className="text-sm text-rose-700 md:col-span-3" aria-live="polite">{customError}</small>
               </form>
             </section>
