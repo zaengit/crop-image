@@ -102,5 +102,8 @@ test('auto focus targets a clear face and Face Enhance reports at least one face
   await page.locator('#enhance-manual').click()
   await page.getByRole('button', { name: 'Face enhance' }).click()
 
-  await expect(page.locator('#enhance-status')).toContainText(/AI Face Enhance \([1-9]\d*\) ready/, { timeout: 120_000 })
+  const enhancementStatus = page.locator('#enhance-status')
+  await expect(enhancementStatus).toContainText(/(?:AI Face Enhance \([1-9]\d*\) ready|local face fallback ready)/, { timeout: 120_000 })
+  const finalStatus = await enhancementStatus.innerText()
+  expect(finalStatus).toMatch(/AI Face Enhance \([1-9]\d*\) ready/)
 })
