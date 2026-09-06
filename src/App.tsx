@@ -10,6 +10,7 @@ import { OutputSettings } from './components/OutputSettings'
 import { ResultGrid } from './components/ResultGrid'
 import { SizeTabs } from './components/SizeTabs'
 import { UploadDropzone } from './components/UploadDropzone'
+import { ThemeToggle } from './components/ThemeToggle'
 
 export function App() {
   const engine = useCropEngine()
@@ -87,6 +88,9 @@ export function App() {
   return (
     <main className="app-shell min-h-screen bg-[#f4f4f2] px-4 py-4 text-neutral-950 sm:px-6 sm:py-6 lg:px-8">
       <div className="mx-auto max-w-[1440px] space-y-6">
+        <div className="flex items-center justify-end">
+          <ThemeToggle />
+        </div>
         {!isStoreMenu ? (
           <>
             <UploadDropzone busy={engine.busy} status={engine.status} onFile={processFile} />
