@@ -9,8 +9,10 @@ const TEST_IMAGE = Buffer.from(`
 </svg>
 `)
 
+const PORTRAIT_URL = 'https://gitlab.com/scikit-image/data/-/raw/master/astronaut.png'
+
 test('upload, focus change, and manual generate work in production build', async ({ page }) => {
-  const browserErrors = []
+  const browserErrors: string[] = []
   page.on('pageerror', (error) => {
     browserErrors.push(error.message)
     console.error(`PAGEERROR: ${error.stack ?? error.message}`)
@@ -56,4 +58,45 @@ test('upload, focus change, and manual generate work in production build', async
   await expect(page.locator('#grid .card')).toHaveCount(1, { timeout: 30_000 })
   await expect(page.locator('#status')).toContainText('Done', { timeout: 10_000 })
   expect(browserErrors).toEqual([])
+})
+
+test('auto focus targets a clear face and Face Enhance reports at least one face', async ({ page, request }) => {
+  test.setTimeout(180_000)
+
+  const portraitResponse = await request.get(PORTRAIT_URL)
+  expect(portraitResponse.ok(), `portrait fixture request failed: ${portraitResponse.status()}`).toBeTruthy()
+  const portrait = await portraitResponse.body()
+
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('http://127.0.0.1:4173/crop-image/')
+  await expect(page.locator('html')).toHaveAttribute('data-app-ready', 'true', { timeout: 10_000 })
+
+  await page.locator('#file').setInputFiles({
+    name: 'astronaut.png',
+    mimeType: 'image/png',
+    buffer: portrait,
+  })
+
+  await expect(page.locator('#status')).toContainText('Ready — adjust the focal point', { timeout: 60_000 })
+  await expect(page.locator('#reset-focus')).toHaveAttribute('aria-pressed', 'true')
+
+  const debug = page.locator('#focus-debug-coordinate')
+  await expect(debug).toBeVisible()
+  const debugText = await debug.innerText()
+  const coordinateMatch = debugText.match(/x:\s*([0-9.]+)\s*·\s*y:\s*([0-9.]+)/)
+  expect(coordinateMatch, `unable to parse focus coordinate: ${debugText}`).not.toBeNull()
+  const x = Number(coordinateMatch![1])
+  const y = Number(coordinateMatch![2])
+
+  // The astronaut portrait has a clear face in the upper-left/center area.
+  // A body/subject-center fallback lands much lower, so this catches that regression.
+  expect(x).toBeGreaterThan(0.25)
+  expect(x).toBeLessThan(0.60)
+  expect(y).toBeGreaterThan(0.08)
+  expect(y).toBeLessThan(0.42)
+
+  await page.locator('#enhance-manual').click()
+  await page.getByRole('button', { name: 'Face enhance' }).click()
+
+  await expect(page.locator('#enhance-status')).toContainText(/AI Face Enhance \([1-9]\d*\) ready/, { timeout: 120_000 })
 })
