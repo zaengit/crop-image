@@ -60,6 +60,49 @@ test('upload, focus change, and manual generate work in production build', async
   expect(browserErrors).toEqual([])
 })
 
+test('ONNX erase background works for passport and custom output', async ({ page, request }) => {
+  test.setTimeout(240_000)
+  const browserErrors: string[] = []
+  page.on('pageerror', (error) => {
+    browserErrors.push(error.message)
+    console.error(`BACKGROUND PAGEERROR: ${error.stack ?? error.message}`)
+  })
+  page.on('console', (message) => {
+    if (message.type() === 'error') console.error(`BACKGROUND BROWSER CONSOLE: ${message.text()}`)
+  })
+
+  const portraitResponse = await request.get(PORTRAIT_URL)
+  expect(portraitResponse.ok(), `portrait fixture request failed: ${portraitResponse.status()}`).toBeTruthy()
+  const portrait = await portraitResponse.body()
+
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('http://127.0.0.1:4173/crop-image/')
+  await expect(page.locator('html')).toHaveAttribute('data-app-ready', 'true', { timeout: 10_000 })
+
+  await page.locator('#file').setInputFiles({
+    name: 'astronaut-background.png',
+    mimeType: 'image/png',
+    buffer: portrait,
+  })
+  await expect(page.locator('#status')).toContainText('Ready — adjust the focal point', { timeout: 60_000 })
+
+  await page.locator('[data-menu="passport"]').click()
+  await page.locator('#passport-panel [data-background="#ffffff"]').click()
+  await expect(page.locator('#background-status')).toContainText('Background ready', { timeout: 120_000 })
+  await expect(page.locator('#background-status')).not.toContainText('ModuleFactory')
+  await expect(page.locator('#background-status')).not.toContainText('Background error')
+
+  await page.locator('[data-menu="custom"]').click()
+  await expect(page.locator('#custom-panel')).toContainText('Erase background on')
+  await page.locator('#custom-width').fill('320')
+  await page.locator('#custom-height').fill('320')
+  await page.locator('#custom-form button[type="submit"]').click()
+  await expect(page.locator('#grid .card')).toHaveCount(1, { timeout: 60_000 })
+  await expect(page.locator('#status')).toContainText('Done', { timeout: 30_000 })
+
+  expect(browserErrors.filter((message) => message.includes('ModuleFactory'))).toEqual([])
+})
+
 test('auto focus targets a clear face and Face Enhance reports at least one face', async ({ page, request }) => {
   test.setTimeout(180_000)
   page.on('console', (message) => {
