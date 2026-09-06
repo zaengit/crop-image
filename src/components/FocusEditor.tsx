@@ -15,6 +15,7 @@ export function FocusEditor({ sourceUrl, focus, previewFilter, onFocusChange, on
   const stageRef = useRef<HTMLDivElement>(null)
   const imageRef = useRef<HTMLImageElement>(null)
   const [dragging, setDragging] = useState(false)
+  const [autoFocusActive, setAutoFocusActive] = useState(true)
   const [imageBox, setImageBox] = useState<ImageBox>({ left: 0, top: 0, width: 0, height: 0 })
 
   const measureImageBox = useCallback(() => {
@@ -41,6 +42,7 @@ export function FocusEditor({ sourceUrl, focus, previewFilter, onFocusChange, on
   }, [])
 
   useEffect(() => {
+    setAutoFocusActive(true)
     measureImageBox()
     const stage = stageRef.current
     if (!stage || typeof ResizeObserver === 'undefined') return
@@ -53,10 +55,16 @@ export function FocusEditor({ sourceUrl, focus, previewFilter, onFocusChange, on
     const stage = stageRef.current
     if (!stage) return
     const rect = stage.getBoundingClientRect()
+    setAutoFocusActive(false)
     onFocusChange(
       (event.clientX - rect.left - imageBox.left) / Math.max(1, imageBox.width),
       (event.clientY - rect.top - imageBox.top) / Math.max(1, imageBox.height),
     )
+  }
+
+  const useAutoFocus = () => {
+    setAutoFocusActive(true)
+    onReset()
   }
 
   const targetStyle = {
@@ -74,11 +82,12 @@ export function FocusEditor({ sourceUrl, focus, previewFilter, onFocusChange, on
         <p className="mt-2 text-sm leading-6 text-neutral-600">Drag anywhere on the image to place the subject where every generated size should prioritize it.</p>
         <button
           id="reset-focus"
-          className="secondary-button mt-5 min-h-11 rounded-xl border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-700 transition hover:border-neutral-950 hover:text-neutral-950"
+          className={`secondary-button mt-5 min-h-11 rounded-xl border px-4 py-2 text-sm font-medium transition ${autoFocusActive ? 'border-neutral-950 bg-neutral-950 text-white' : 'border-neutral-300 bg-white text-neutral-700 hover:border-neutral-950 hover:text-neutral-950'}`}
           type="button"
-          onClick={onReset}
+          aria-pressed={autoFocusActive}
+          onClick={useAutoFocus}
         >
-          Use auto focus
+          {autoFocusActive ? 'Auto focus active' : 'Use auto focus'}
         </button>
       </div>
       <div
@@ -100,7 +109,7 @@ export function FocusEditor({ sourceUrl, focus, previewFilter, onFocusChange, on
       >
         <div className="pointer-events-none absolute left-3 top-3 z-10 flex items-center gap-2 rounded-full border border-neutral-200 bg-white/90 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-600 shadow-sm backdrop-blur sm:left-4 sm:top-4">
           <span className="h-1.5 w-1.5 rounded-full bg-neutral-950" aria-hidden="true" />
-          Drag to focus
+          {autoFocusActive ? 'Auto focus' : 'Manual focus'}
         </div>
         <div
           id="focus-debug-coordinate"
