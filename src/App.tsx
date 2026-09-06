@@ -34,6 +34,7 @@ export function App() {
 
   const visibleResults = engine.generated.filter((item: Generated) => item.preset.group === menu)
   const generateDisabled = engine.busy || !engine.hasImage
+  const isStoreMenu = menu === 'store'
 
   const processFile = (file: File | undefined) => {
     if (!file) return
@@ -83,37 +84,43 @@ export function App() {
   return (
     <main className="app-shell min-h-screen bg-[#f4f4f2] px-4 py-4 text-neutral-950 sm:px-6 sm:py-6 lg:px-8">
       <div className="mx-auto max-w-[1440px] space-y-6">
-        <UploadDropzone busy={engine.busy} status={engine.status} onFile={processFile} />
+        {!isStoreMenu ? (
+          <>
+            <UploadDropzone busy={engine.busy} status={engine.status} onFile={processFile} />
 
-        <EnhancementPanel
-          visible={engine.hasImage}
-          settings={engine.enhancement}
-          status={engine.enhancementStatus}
-          onPreviewChange={setPreviewEnhancement}
-          onApply={engine.applyEnhancement}
-          onAuto={engine.autoEnhance}
-          onReset={engine.resetEnhancement}
-          onCompareChange={setComparing}
-        />
+            <EnhancementPanel
+              visible={engine.hasImage}
+              settings={engine.enhancement}
+              status={engine.enhancementStatus}
+              onPreviewChange={setPreviewEnhancement}
+              onApply={engine.applyEnhancement}
+              onAuto={engine.autoEnhance}
+              onReset={engine.resetEnhancement}
+              onCompareChange={setComparing}
+            />
 
-        {engine.hasImage ? (
-          <FocusEditor
-            sourceUrl={engine.sourceUrl}
-            focus={engine.focus}
-            previewFilter={previewFilter}
-            onFocusChange={engine.updateFocus}
-            onReset={engine.resetFocus}
-          />
+            {engine.hasImage ? (
+              <FocusEditor
+                sourceUrl={engine.sourceUrl}
+                focus={engine.focus}
+                previewFilter={previewFilter}
+                onFocusChange={engine.updateFocus}
+                onReset={engine.resetFocus}
+              />
+            ) : null}
+          </>
         ) : null}
 
         <section id="results" className="rounded-[28px] border border-neutral-200 bg-white p-4 shadow-[0_20px_55px_rgba(15,23,42,0.06)] sm:p-6">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.2em] text-neutral-500">03 / Generate</p>
-              <h2 className="mt-2 text-2xl font-semibold tracking-tight text-neutral-950">Choose an output</h2>
+          {!isStoreMenu ? (
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-neutral-500">03 / Generate</p>
+                <h2 className="mt-2 text-2xl font-semibold tracking-tight text-neutral-950">Choose an output</h2>
+              </div>
+              <OutputSettings engine={engine} />
             </div>
-            <OutputSettings engine={engine} />
-          </div>
+          ) : null}
 
           <SizeTabs value={menu} onChange={setMenu} />
 
