@@ -40,6 +40,8 @@ async function getSession() {
     sessionPromise = (async () => {
       const ort = await getOrt()
       ort.env.wasm.numThreads = 1
+      const baseUrl = new URL(import.meta.env.BASE_URL, globalThis.location.origin)
+      ort.env.wasm.wasmPaths = new URL('ort-wasm/', baseUrl).href
       const modelUrl = `${import.meta.env.BASE_URL}models/version-RFB-320.onnx`
       return ort.InferenceSession.create(modelUrl, {
         executionProviders: ['wasm'],
@@ -137,9 +139,13 @@ function sourceCanvas(rgba: Uint8ClampedArray, width: number, height: number) {
   return canvas
 }
 
-async function detectMediaPipeFaceRegions(rgba: Uint8ClampedArray, width: number, height: number): Promise<FocusRegion[]> {
-  const canvas = sourceCanvas(rgba, width, height)
-  if (!canvas) return []
+async function detectMediaPipeFacesOnCanvas(
+  canvas: OffscreenCanvas,
+  mapX: number,
+  mapY: number,
+  mapWidth: number,
+  mapHeight: number,
+): Promise<FocusRegion[]> {
   const detector = await getFaceDetector()
   const result = detector.detect(canvas as never)
   const regions: FocusRegion[] = []
@@ -149,10 +155,14 @@ async function detectMediaPipeFaceRegions(rgba: Uint8ClampedArray, width: number
     const category = detection.categories?.[0]
     if (!box) continue
     const confidence = category?.score ?? 0
-    const x = Math.max(0, Math.min(1, box.originX / width))
-    const y = Math.max(0, Math.min(1, box.originY / height))
-    const boxWidth = Math.max(0, Math.min(1 - x, box.width / width))
-    const boxHeight = Math.max(0, Math.min(1 - y, box.height / height))
+    const localX = Math.max(0, Math.min(1, box.originX / canvas.width))
+    const localY = Math.max(0, Math.min(1, box.originY / canvas.height))
+    const localWidth = Math.max(0, Math.min(1 - localX, box.width / canvas.width))
+    const localHeight = Math.max(0, Math.min(1 - localY, box.height / canvas.height))
+    const x = mapX + localX * mapWidth
+    const y = mapY + localY * mapHeight
+    const boxWidth = localWidth * mapWidth
+    const boxHeight = localHeight * mapHeight
     if (!validFaceBox(x, y, x + boxWidth, y + boxHeight)) continue
     regions.push({
       x,
@@ -163,6 +173,44 @@ async function detectMediaPipeFaceRegions(rgba: Uint8ClampedArray, width: number
       kind: 'face',
       label: 'face',
     })
+  }
+
+  return regions
+}
+
+function tileStarts(total: number, tile: number) {
+  if (tile >= total) return [0]
+  const starts = new Set<number>([0, total - tile])
+  const step = Math.max(1, Math.round(tile * 0.72))
+  for (let start = 0; start + tile < total; start += step) starts.add(start)
+  return [...starts].sort((a, b) => a - b)
+}
+
+async function detectMediaPipeFaceRegions(rgba: Uint8ClampedArray, width: number, height: number): Promise<FocusRegion[]> {
+  const source = sourceCanvas(rgba, width, height)
+  if (!source) return []
+  const regions = await detectMediaPipeFacesOnCanvas(source, 0, 0, 1, 1)
+
+  if (width > height * 1.35) {
+    const tileWidth = Math.min(width, Math.max(height, Math.round(height * 1.25)))
+    for (const startX of tileStarts(width, tileWidth)) {
+      if (tileWidth === width) break
+      const tile = new OffscreenCanvas(tileWidth, height)
+      const ctx = tile.getContext('2d')
+      if (!ctx) continue
+      ctx.drawImage(source, startX, 0, tileWidth, height, 0, 0, tileWidth, height)
+      regions.push(...await detectMediaPipeFacesOnCanvas(tile, startX / width, 0, tileWidth / width, 1))
+    }
+  } else if (height > width * 1.35) {
+    const tileHeight = Math.min(height, Math.max(width, Math.round(width * 1.25)))
+    for (const startY of tileStarts(height, tileHeight)) {
+      if (tileHeight === height) break
+      const tile = new OffscreenCanvas(width, tileHeight)
+      const ctx = tile.getContext('2d')
+      if (!ctx) continue
+      ctx.drawImage(source, 0, startY, width, tileHeight, 0, 0, width, tileHeight)
+      regions.push(...await detectMediaPipeFacesOnCanvas(tile, 0, startY / height, 1, tileHeight / height))
+    }
   }
 
   return nms(regions)
