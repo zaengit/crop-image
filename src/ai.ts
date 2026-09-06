@@ -13,6 +13,7 @@ const MODEL_HEIGHT = 240
 const SCORE_THRESHOLD = 0.6
 const FALLBACK_SCORE_THRESHOLD = 0.48
 const PERSON_FACE_FALLBACK_SCORE_THRESHOLD = 0.28
+const PERSON_HEAD_FACE_SCORE_THRESHOLD = 0.16
 const OBJECT_SCORE_THRESHOLD = 0.2
 const GENERAL_OBJECT_SCORE_THRESHOLD = 0.3
 const PERSON_SCORE_THRESHOLD = 0.2
@@ -232,22 +233,16 @@ function faceCenterInsidePerson(face: FocusRegion, person: FocusRegion) {
     && cy <= person.y + person.height * 0.72
 }
 
-async function detectFacesInsidePerson(
+async function detectFacesInCrop(
   rgba: Uint8ClampedArray,
   width: number,
   height: number,
-  person: FocusRegion,
+  cropX: number,
+  cropY: number,
+  cropWidth: number,
+  cropHeight: number,
+  threshold: number,
 ): Promise<FocusRegion[]> {
-  if (person.label !== 'person') return []
-
-  const padX = person.width * 0.14
-  const padTop = person.height * 0.08
-  const cropX = Math.max(0, person.x - padX)
-  const cropY = Math.max(0, person.y - padTop)
-  const cropRight = Math.min(1, person.x + person.width + padX)
-  const cropBottom = Math.min(1, person.y + person.height * 0.72)
-  const cropWidth = cropRight - cropX
-  const cropHeight = cropBottom - cropY
   if (cropWidth <= 0 || cropHeight <= 0) return []
 
   const sx = Math.max(0, Math.floor(cropX * width))
@@ -262,12 +257,7 @@ async function detectFacesInsidePerson(
   if (!ctx) return []
   ctx.drawImage(source, sx, sy, sw, sh, 0, 0, sw, sh)
   const pixels = ctx.getImageData(0, 0, sw, sh).data
-  const faces = await detectFaceRegions(
-    new Uint8ClampedArray(pixels),
-    sw,
-    sh,
-    PERSON_FACE_FALLBACK_SCORE_THRESHOLD,
-  )
+  const faces = await detectFaceRegions(new Uint8ClampedArray(pixels), sw, sh, threshold)
 
   return faces.map((face) => ({
     ...face,
@@ -278,6 +268,58 @@ async function detectFacesInsidePerson(
     kind: 'face' as const,
     label: 'face',
   }))
+}
+
+async function detectFacesInsidePerson(
+  rgba: Uint8ClampedArray,
+  width: number,
+  height: number,
+  person: FocusRegion,
+): Promise<FocusRegion[]> {
+  if (person.label !== 'person') return []
+
+  const padX = person.width * 0.14
+  const padTop = person.height * 0.08
+  const cropX = Math.max(0, person.x - padX)
+  const cropY = Math.max(0, person.y - padTop)
+  const cropRight = Math.min(1, person.x + person.width + padX)
+  const cropBottom = Math.min(1, person.y + person.height * 0.72)
+  return detectFacesInCrop(
+    rgba,
+    width,
+    height,
+    cropX,
+    cropY,
+    cropRight - cropX,
+    cropBottom - cropY,
+    PERSON_FACE_FALLBACK_SCORE_THRESHOLD,
+  )
+}
+
+async function detectFacesInsidePersonHead(
+  rgba: Uint8ClampedArray,
+  width: number,
+  height: number,
+  person: FocusRegion,
+): Promise<FocusRegion[]> {
+  if (person.label !== 'person') return []
+
+  const padX = person.width * 0.2
+  const padTop = person.height * 0.1
+  const cropX = Math.max(0, person.x - padX)
+  const cropY = Math.max(0, person.y - padTop)
+  const cropRight = Math.min(1, person.x + person.width + padX)
+  const cropBottom = Math.min(1, person.y + person.height * 0.42)
+  return detectFacesInCrop(
+    rgba,
+    width,
+    height,
+    cropX,
+    cropY,
+    cropRight - cropX,
+    cropBottom - cropY,
+    PERSON_HEAD_FACE_SCORE_THRESHOLD,
+  )
 }
 
 export async function detectFaces(rgba: Uint8ClampedArray, width: number, height: number): Promise<FocusRegion[]> {
@@ -298,8 +340,10 @@ export async function detectFaces(rgba: Uint8ClampedArray, width: number, height
       try {
         const personFaces = await detectFacesInsidePerson(rgba, width, height, subject)
         if (personFaces.length) return personFaces
+        const headFaces = await detectFacesInsidePersonHead(rgba, width, height, subject)
+        if (headFaces.length) return headFaces
       } catch (error) {
-        console.warn('Second-pass face detection inside person region failed.', error)
+        console.warn('Face detection inside person region failed.', error)
       }
       if (weakFace && faceCenterInsidePerson(weakFace, subject)) return [weakFace]
     }
