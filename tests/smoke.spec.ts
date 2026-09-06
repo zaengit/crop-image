@@ -107,3 +107,59 @@ test('auto focus targets a clear face and Face Enhance reports at least one face
   const finalStatus = await enhancementStatus.innerText()
   expect(finalStatus).toMatch(/AI Face Enhance \([1-9]\d*\) ready/)
 })
+
+test('Face Enhance processes both detected faces', async ({ page, request }) => {
+  test.setTimeout(240_000)
+  page.on('console', (message) => {
+    if (message.type() === 'warning' || message.type() === 'error') {
+      console.error(`MULTI FACE TEST BROWSER ${message.type().toUpperCase()}: ${message.text()}`)
+    }
+  })
+  page.on('pageerror', (error) => console.error(`MULTI FACE TEST PAGEERROR: ${error.stack ?? error.message}`))
+
+  const portraitResponse = await request.get(PORTRAIT_URL)
+  expect(portraitResponse.ok(), `portrait fixture request failed: ${portraitResponse.status()}`).toBeTruthy()
+  const portrait = await portraitResponse.body()
+
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('http://127.0.0.1:4173/crop-image/')
+  await expect(page.locator('html')).toHaveAttribute('data-app-ready', 'true', { timeout: 10_000 })
+
+  const doublePortraitBase64 = await page.evaluate(async (portraitBase64) => {
+    const image = new Image()
+    image.src = `data:image/png;base64,${portraitBase64}`
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve()
+      image.onerror = () => reject(new Error('Unable to decode portrait fixture'))
+    })
+
+    const canvas = document.createElement('canvas')
+    canvas.width = 1024
+    canvas.height = 512
+    const ctx = canvas.getContext('2d')
+    if (!ctx) throw new Error('Unable to create multi-face fixture canvas')
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.drawImage(image, 0, 0, 512, 512)
+    ctx.drawImage(image, 512, 0, 512, 512)
+    return canvas.toDataURL('image/png').split(',')[1]
+  }, portrait.toString('base64'))
+  const doublePortrait = Buffer.from(doublePortraitBase64, 'base64')
+
+  await page.locator('#file').setInputFiles({
+    name: 'double-astronaut.png',
+    mimeType: 'image/png',
+    buffer: doublePortrait,
+  })
+
+  await expect(page.locator('#status')).toContainText('Ready — adjust the focal point', { timeout: 60_000 })
+  await expect(page.locator('#reset-focus')).toHaveAttribute('aria-pressed', 'true')
+
+  await page.locator('#enhance-manual').click()
+  await page.getByRole('button', { name: 'Face enhance' }).click()
+
+  const enhancementStatus = page.locator('#enhance-status')
+  await expect(enhancementStatus).toContainText(/(?:AI Face Enhance \(2\) ready|local face fallback ready)/, { timeout: 180_000 })
+  const finalStatus = await enhancementStatus.innerText()
+  expect(finalStatus).toMatch(/AI Face Enhance \(2\) ready/)
+})
