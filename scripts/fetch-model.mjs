@@ -24,10 +24,10 @@ const models = [
     sha256: '40338edf5ec70d43e318b0a716a84d4564cd1802759a7a07170c7e43796dbf58',
   },
   {
-    name: 'Selfie Segmenter',
-    target: resolve('public/models/selfie_segmenter.tflite'),
-    url: 'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/1/selfie_segmenter.tflite',
-    sha256: '191ac9529ae506ee0beefa6b2c945a172dab9d07d1e802a290a4e4038226658b',
+    name: 'MODNet portrait matting',
+    target: resolve('public/models/modnet_photographic_portrait_matting.onnx'),
+    url: 'https://huggingface.co/DavG25/modnet-pretrained-models/resolve/6563459/models/modnet_photographic_portrait_matting.onnx',
+    sha256: '07c308cf0fc7e6e8b2065a12ed7fc07e1de8febb7dc7839d7b7f15dd66584df9',
   },
   {
     name: 'Real-ESRGAN 2x',
