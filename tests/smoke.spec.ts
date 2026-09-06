@@ -206,3 +206,29 @@ test('Face Enhance processes both detected faces', async ({ page, request }) => 
   const finalStatus = await enhancementStatus.innerText()
   expect(finalStatus).toMatch(/AI Face Enhance \(2\) ready/)
 })
+
+
+test('dark/light color mode toggles and persists', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto('http://127.0.0.1:4173/crop-image/')
+  await page.evaluate(() => localStorage.removeItem('crop-image-theme'))
+  await page.reload()
+
+  const html = page.locator('html')
+  const toggle = page.locator('#theme-toggle')
+
+  await expect(html).toHaveAttribute('data-theme', 'light')
+  await expect(toggle).toHaveAttribute('aria-label', 'Switch to dark mode')
+
+  await toggle.click()
+  await expect(html).toHaveAttribute('data-theme', 'dark')
+  await expect(toggle).toHaveAttribute('aria-label', 'Switch to light mode')
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+
+  await page.reload()
+  await expect(html).toHaveAttribute('data-theme', 'dark')
+
+  await toggle.click()
+  await expect(html).toHaveAttribute('data-theme', 'light')
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+})
