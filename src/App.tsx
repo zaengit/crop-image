@@ -34,6 +34,8 @@ export function App() {
 
   const visibleResults = engine.generated.filter((item: Generated) => item.preset.group === menu)
   const generateDisabled = engine.busy || !engine.hasImage
+  const backgroundPreparing = /^(Removing|Restoring|Preparing)/.test(engine.backgroundStatus)
+  const backgroundGenerateDisabled = generateDisabled || backgroundPreparing
   const isStoreMenu = menu === 'store'
 
   const processFile = (file: File | undefined) => {
@@ -69,6 +71,7 @@ export function App() {
 
   const submitCustom = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (backgroundPreparing) return
     setCustomError(engine.generateCustom(customWidth, customHeight))
   }
 
@@ -143,7 +146,7 @@ export function App() {
                   <h3 className="text-lg font-semibold">Passport photo</h3>
                   <p className="text-sm leading-6 text-neutral-600">Choose the background and generate portrait-focused 2 × 3, 3 × 4, and 4 × 6 outputs.</p>
                 </div>
-                <button id="generate-passport" className="primary-button rounded-xl bg-neutral-950 px-4 py-2.5 font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40" type="button" disabled={generateDisabled} onClick={() => engine.generateGroup('passport')}>Generate crop</button>
+                <button id="generate-passport" className="primary-button rounded-xl bg-neutral-950 px-4 py-2.5 font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40" type="button" disabled={backgroundGenerateDisabled} onClick={() => engine.generateGroup('passport')}>{backgroundPreparing ? 'Preparing background…' : 'Generate crop'}</button>
               </div>
               <div className="mt-4 grid gap-3 lg:grid-cols-[220px_1fr]">
                 <div>
@@ -234,7 +237,10 @@ export function App() {
                       onChange={(value) => engine.setBackground(value)}
                     />
                   </div>
-                  <small className="mt-2 block text-sm text-neutral-600" aria-live="polite">{engine.backgroundStatus}</small>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-neutral-600" aria-live="polite">
+                    {engine.background !== 'original' ? <span className="inline-block size-3 rounded-full border border-neutral-300" style={{ backgroundColor: engine.background }} aria-hidden="true" /> : null}
+                    <span>{backgroundPreparing ? engine.backgroundStatus : engine.background === 'original' ? 'Erase background off — original image will be used.' : `Erase background on — ${engine.background.toUpperCase()} is ready.`}</span>
+                  </div>
                 </div>
               </div>
 
@@ -269,7 +275,7 @@ export function App() {
                     )
                   })}
                 </div>
-                <button className="primary-button rounded-xl bg-neutral-950 px-4 py-2.5 font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 md:col-span-3 md:w-fit" type="submit" disabled={generateDisabled}>Generate custom size</button>
+                <button className="primary-button rounded-xl bg-neutral-950 px-4 py-2.5 font-semibold text-white transition hover:bg-neutral-800 disabled:cursor-not-allowed disabled:opacity-40 md:col-span-3 md:w-fit" type="submit" disabled={backgroundGenerateDisabled}>{backgroundPreparing ? 'Preparing background…' : 'Generate custom size'}</button>
                 <small id="custom-error" className="text-sm text-rose-700 md:col-span-3" aria-live="polite">{customError}</small>
               </form>
             </section>
