@@ -52,7 +52,7 @@ export function createCropWorker() {
   return worker
 }
 
-export function onCropWorker(listener: (worker: Worker | undefined) => void>() {
+export function onCropWorker(listener: (worker: Worker | undefined) => void) {
   listeners.add(listener)
   listener(currentWorker)
   return () => listeners.delete(listener)
