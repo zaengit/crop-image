@@ -12,6 +12,7 @@ const MODEL_WIDTH = 320
 const MODEL_HEIGHT = 240
 const SCORE_THRESHOLD = 0.6
 const FALLBACK_SCORE_THRESHOLD = 0.48
+const PERSON_FACE_FALLBACK_SCORE_THRESHOLD = 0.28
 const OBJECT_SCORE_THRESHOLD = 0.2
 const GENERAL_OBJECT_SCORE_THRESHOLD = 0.3
 const PERSON_SCORE_THRESHOLD = 0.2
@@ -106,7 +107,12 @@ function sourceCanvas(rgba: Uint8ClampedArray, width: number, height: number) {
   return canvas
 }
 
-async function detectFaceRegions(rgba: Uint8ClampedArray, width: number, height: number): Promise<FocusRegion[]> {
+async function detectFaceRegions(
+  rgba: Uint8ClampedArray,
+  width: number,
+  height: number,
+  fallbackThreshold = FALLBACK_SCORE_THRESHOLD,
+): Promise<FocusRegion[]> {
   const canvas = new OffscreenCanvas(MODEL_WIDTH, MODEL_HEIGHT)
   const ctx = canvas.getContext('2d', { willReadFrequently: true })
   if (!ctx) return []
@@ -138,7 +144,7 @@ async function detectFaceRegions(rgba: Uint8ClampedArray, width: number, height:
 
   for (let i = 0; i < count; i++) {
     const confidence = scores[i * 2 + 1]
-    if (confidence < FALLBACK_SCORE_THRESHOLD) continue
+    if (confidence < fallbackThreshold) continue
 
     const x1 = Math.max(0, Math.min(1, boxes[i * 4]))
     const y1 = Math.max(0, Math.min(1, boxes[i * 4 + 1]))
@@ -215,6 +221,17 @@ async function detectObjectSubject(rgba: Uint8ClampedArray, width: number, heigh
   return bestPerson?.region ?? bestObject?.region
 }
 
+function faceCenterInsidePerson(face: FocusRegion, person: FocusRegion) {
+  const cx = face.x + face.width / 2
+  const cy = face.y + face.height / 2
+  const padX = person.width * 0.12
+  const padY = person.height * 0.08
+  return cx >= person.x - padX
+    && cx <= person.x + person.width + padX
+    && cy >= person.y - padY
+    && cy <= person.y + person.height * 0.72
+}
+
 async function detectFacesInsidePerson(
   rgba: Uint8ClampedArray,
   width: number,
@@ -245,7 +262,12 @@ async function detectFacesInsidePerson(
   if (!ctx) return []
   ctx.drawImage(source, sx, sy, sw, sh, 0, 0, sw, sh)
   const pixels = ctx.getImageData(0, 0, sw, sh).data
-  const faces = await detectFaceRegions(new Uint8ClampedArray(pixels), sw, sh)
+  const faces = await detectFaceRegions(
+    new Uint8ClampedArray(pixels),
+    sw,
+    sh,
+    PERSON_FACE_FALLBACK_SCORE_THRESHOLD,
+  )
 
   return faces.map((face) => ({
     ...face,
@@ -279,6 +301,7 @@ export async function detectFaces(rgba: Uint8ClampedArray, width: number, height
       } catch (error) {
         console.warn('Second-pass face detection inside person region failed.', error)
       }
+      if (weakFace && faceCenterInsidePerson(weakFace, subject)) return [weakFace]
     }
     if (subject) return [subject]
   } catch (error) {
