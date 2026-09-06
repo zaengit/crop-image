@@ -3,6 +3,7 @@ import { createOrtSession, recreateOrtSessionWithWasm, type OrtRuntimeSession } 
 const SCALE = 2
 const TILE = 128
 const OVERLAP = 8
+const MODEL_ALIGNMENT = 2
 const MODEL_URL = `${import.meta.env.BASE_URL}models/realesrgan_x2plus.onnx`
 const SESSION_OPTIONS = { graphOptimizationLevel: 'all' as const }
 
@@ -24,6 +25,15 @@ export function cacheAiUpscale(source: Uint8ClampedArray, result: CachedAiUpscal
   cachedUpscales.set(source, result)
 }
 
+function errorText(error: unknown) {
+  if (error instanceof Error) return `${error.name}: ${error.message}`
+  return String(error)
+}
+
+function alignedDimension(value: number) {
+  return Math.max(MODEL_ALIGNMENT, Math.ceil(value / MODEL_ALIGNMENT) * MODEL_ALIGNMENT)
+}
+
 function clampByte(value: number) {
   return Math.max(0, Math.min(255, Math.round(value)))
 }
@@ -32,7 +42,7 @@ async function getSession() {
   if (!sessionPromise) {
     sessionPromise = createOrtSession(MODEL_URL, SESSION_OPTIONS).catch((error) => {
       sessionPromise = undefined
-      throw error
+      throw new Error(`Real-ESRGAN session creation failed: ${errorText(error)}`)
     })
   }
   return sessionPromise
@@ -43,7 +53,7 @@ async function switchSessionToWasm(failed: RuntimeSession) {
   const fallbackPromise = recreateOrtSessionWithWasm(MODEL_URL, SESSION_OPTIONS)
   sessionPromise = fallbackPromise.catch((error) => {
     sessionPromise = undefined
-    throw error
+    throw new Error(`Real-ESRGAN WASM session recreation failed: ${errorText(error)}`)
   })
   return sessionPromise
 }
@@ -148,7 +158,11 @@ async function runTile(
   const feeds = {
     [runtime.session.inputNames[0]]: new runtime.ort.Tensor('float32', input, [1, 3, tileHeight, tileWidth]),
   }
-  return runtime.session.run(feeds)
+  try {
+    return await runtime.session.run(feeds)
+  } catch (error) {
+    throw new Error(`Real-ESRGAN ${runtime.backend} inference failed for ${tileWidth}x${tileHeight}: ${errorText(error)}`)
+  }
 }
 
 export async function aiUpscale2x(
@@ -192,23 +206,25 @@ export async function aiUpscale2x(
       const sourceBottom = Math.min(height, coreY + coreHeight + OVERLAP)
       const tileWidth = sourceRight - sourceX
       const tileHeight = sourceBottom - sourceY
-      const input = extractTile(source, width, height, sourceX, sourceY, tileWidth, tileHeight)
+      const inferenceWidth = alignedDimension(tileWidth)
+      const inferenceHeight = alignedDimension(tileHeight)
+      const input = extractTile(source, width, height, sourceX, sourceY, inferenceWidth, inferenceHeight)
 
       let outputs
       try {
-        outputs = await runTile(runtime, input, tileWidth, tileHeight)
+        outputs = await runTile(runtime, input, inferenceWidth, inferenceHeight)
       } catch (error) {
         if (runtime.backend !== 'webgpu') throw error
         console.warn('WebGPU ONNX inference failed; recreating Real-ESRGAN session with WASM.', error)
         runtime = await switchSessionToWasm(runtime)
-        outputs = await runTile(runtime, input, tileWidth, tileHeight)
+        outputs = await runTile(runtime, input, inferenceWidth, inferenceHeight)
       }
 
       const tensor = outputs[runtime.session.outputNames[0]]
       if (!tensor || tensor.dims.length !== 4) throw new Error('Unexpected Real-ESRGAN output shape')
       const outputHeight = Number(tensor.dims[2])
       const outputWidth = Number(tensor.dims[3])
-      if (outputWidth !== tileWidth * SCALE || outputHeight !== tileHeight * SCALE) {
+      if (outputWidth !== inferenceWidth * SCALE || outputHeight !== inferenceHeight * SCALE) {
         throw new Error(`Unexpected Real-ESRGAN scale ${outputWidth}x${outputHeight}`)
       }
       copyOutputTile(
