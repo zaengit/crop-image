@@ -88,7 +88,8 @@ export function App() {
   return (
     <main className="app-shell min-h-screen bg-[#f4f4f2] px-4 py-4 text-neutral-950 sm:px-6 sm:py-6 lg:px-8">
       <div className="mx-auto max-w-[1440px] space-y-6">
-        <div className="flex items-center justify-end">
+        <div className="flex items-center justify-between">
+          <div className="text-2xl font-extrabold tracking-[-0.04em] text-neutral-950" aria-label="Crop">Crop</div>
           <ThemeToggle />
         </div>
         {!isStoreMenu ? (
