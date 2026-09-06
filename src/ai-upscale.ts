@@ -24,6 +24,11 @@ export function cacheAiUpscale(source: Uint8ClampedArray, result: CachedAiUpscal
   cachedUpscales.set(source, result)
 }
 
+function errorText(error: unknown) {
+  if (error instanceof Error) return `${error.name}: ${error.message}`
+  return String(error)
+}
+
 function clampByte(value: number) {
   return Math.max(0, Math.min(255, Math.round(value)))
 }
@@ -32,7 +37,7 @@ async function getSession() {
   if (!sessionPromise) {
     sessionPromise = createOrtSession(MODEL_URL, SESSION_OPTIONS).catch((error) => {
       sessionPromise = undefined
-      throw error
+      throw new Error(`Real-ESRGAN session creation failed: ${errorText(error)}`)
     })
   }
   return sessionPromise
@@ -43,7 +48,7 @@ async function switchSessionToWasm(failed: RuntimeSession) {
   const fallbackPromise = recreateOrtSessionWithWasm(MODEL_URL, SESSION_OPTIONS)
   sessionPromise = fallbackPromise.catch((error) => {
     sessionPromise = undefined
-    throw error
+    throw new Error(`Real-ESRGAN WASM session recreation failed: ${errorText(error)}`)
   })
   return sessionPromise
 }
@@ -148,7 +153,11 @@ async function runTile(
   const feeds = {
     [runtime.session.inputNames[0]]: new runtime.ort.Tensor('float32', input, [1, 3, tileHeight, tileWidth]),
   }
-  return runtime.session.run(feeds)
+  try {
+    return await runtime.session.run(feeds)
+  } catch (error) {
+    throw new Error(`Real-ESRGAN ${runtime.backend} inference failed for ${tileWidth}x${tileHeight}: ${errorText(error)}`)
+  }
 }
 
 export async function aiUpscale2x(
