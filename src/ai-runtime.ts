@@ -15,10 +15,16 @@ export type OrtRuntimeSession = OrtRuntime & {
 let runtimePromise: Promise<OrtRuntime> | undefined
 let wasmRuntimePromise: Promise<OrtRuntime> | undefined
 
+function configureWasmRuntime(ort: OrtModule) {
+  ort.env.wasm.numThreads = 1
+  const baseUrl = new URL(import.meta.env.BASE_URL, globalThis.location.origin)
+  ort.env.wasm.wasmPaths = new URL('ort-wasm/', baseUrl).href
+}
+
 async function loadWasmRuntime(): Promise<OrtRuntime> {
   wasmRuntimePromise ??= (async () => {
     const ort = await import('onnxruntime-web/wasm')
-    ort.env.wasm.numThreads = 1
+    configureWasmRuntime(ort)
     return { ort, backend: 'wasm' as const }
   })().catch((error) => {
     wasmRuntimePromise = undefined
