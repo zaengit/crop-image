@@ -12,6 +12,12 @@ const models = [
     sha256: '34cd7e60aeff28744c657de7a3dc64e872d506741de66987f3426f2b79f88017',
   },
   {
+    name: 'BlazeFace short range',
+    target: resolve('public/models/blaze_face_short_range.tflite'),
+    url: 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite',
+    sha256: '0000000000000000000000000000000000000000000000000000000000000000',
+  },
+  {
     name: 'EfficientDet-Lite0',
     target: resolve('public/models/efficientdet_lite0.tflite'),
     url: 'https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite0/float32/1/efficientdet_lite0.tflite',
