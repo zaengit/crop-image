@@ -1,17 +1,11 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-const mediaPipeSource = resolve('node_modules/@mediapipe/tasks-vision/wasm')
+// Background removal now uses MODNet through ONNX Runtime Web. Keep this
+// script name for compatibility with existing npm scripts, but only stage ORT
+// runtime assets so production no longer ships MediaPipe's ModuleFactory loader.
 const mediaPipeTarget = resolve('public/mediapipe-wasm')
-
-if (!existsSync(mediaPipeSource)) {
-  throw new Error(`MediaPipe WASM runtime not found at ${mediaPipeSource}. Run npm install first.`)
-}
-
 rmSync(mediaPipeTarget, { recursive: true, force: true })
-mkdirSync(mediaPipeTarget, { recursive: true })
-cpSync(mediaPipeSource, mediaPipeTarget, { recursive: true })
-console.log('Copied MediaPipe WASM runtime to public/mediapipe-wasm')
 
 const ortSource = resolve('node_modules/onnxruntime-web/dist')
 const ortTarget = resolve('public/ort-wasm')
