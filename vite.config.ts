@@ -16,8 +16,8 @@ function useOnnxBackgroundSegmenter(): Plugin {
   }
 }
 
-export default defineConfig(({ command, isPreview }) => ({
-  base: command === 'build' || isPreview ? '/crop-image/' : '/',
+export default defineConfig(() => ({
+  base: '/',
   resolve: {
     alias: {
       '@mediapipe/tasks-vision': fileURLToPath(new URL('./src/onnx-image-segmenter.ts', import.meta.url)),
