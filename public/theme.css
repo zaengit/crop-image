@@ -208,3 +208,17 @@ html[data-theme='dark'] ::selection {
   background: #f5f5f5;
   color: #111111;
 }
+
+/* App brand in the top toolbar, opposite the theme toggle. */
+.app-shell > div > .flex.items-center.justify-end:first-child {
+  justify-content: space-between;
+}
+
+.app-shell > div > .flex.items-center.justify-end:first-child::before {
+  content: 'Crop';
+  font-size: 1.5rem;
+  line-height: 1;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  color: currentColor;
+}
