@@ -62,6 +62,12 @@ test('upload, focus change, and manual generate work in production build', async
 
 test('auto focus targets a clear face and Face Enhance reports at least one face', async ({ page, request }) => {
   test.setTimeout(180_000)
+  page.on('console', (message) => {
+    if (message.type() === 'warning' || message.type() === 'error') {
+      console.error(`FACE TEST BROWSER ${message.type().toUpperCase()}: ${message.text()}`)
+    }
+  })
+  page.on('pageerror', (error) => console.error(`FACE TEST PAGEERROR: ${error.stack ?? error.message}`))
 
   const portraitResponse = await request.get(PORTRAIT_URL)
   expect(portraitResponse.ok(), `portrait fixture request failed: ${portraitResponse.status()}`).toBeTruthy()
@@ -88,8 +94,6 @@ test('auto focus targets a clear face and Face Enhance reports at least one face
   const x = Number(coordinateMatch![1])
   const y = Number(coordinateMatch![2])
 
-  // The astronaut portrait has a clear face in the upper-left/center area.
-  // A body/subject-center fallback lands much lower, so this catches that regression.
   expect(x).toBeGreaterThan(0.25)
   expect(x).toBeLessThan(0.60)
   expect(y).toBeGreaterThan(0.08)
