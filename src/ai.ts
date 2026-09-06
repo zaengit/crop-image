@@ -17,15 +17,18 @@ const PERSON_HEAD_FACE_SCORE_THRESHOLD = 0.16
 const OBJECT_SCORE_THRESHOLD = 0.2
 const GENERAL_OBJECT_SCORE_THRESHOLD = 0.3
 const PERSON_SCORE_THRESHOLD = 0.2
+const MEDIAPIPE_FACE_SCORE_THRESHOLD = 0.35
 const IOU_THRESHOLD = 0.3
 
 type OrtModule = typeof import('onnxruntime-web/wasm')
 type VisionModule = typeof import('@mediapipe/tasks-vision')
 type ObjectDetectorInstance = Awaited<ReturnType<VisionModule['ObjectDetector']['createFromOptions']>>
+type FaceDetectorInstance = Awaited<ReturnType<VisionModule['FaceDetector']['createFromOptions']>>
 
 let ortPromise: Promise<OrtModule> | undefined
 let sessionPromise: Promise<Awaited<ReturnType<OrtModule['InferenceSession']['create']>>> | undefined
 let objectDetectorPromise: Promise<ObjectDetectorInstance> | undefined
+let faceDetectorPromise: Promise<FaceDetectorInstance> | undefined
 
 function getOrt() {
   ortPromise ??= import('onnxruntime-web/wasm')
@@ -50,12 +53,17 @@ async function getSession() {
   return sessionPromise
 }
 
+async function getVisionFileset() {
+  const { FilesetResolver } = await import('@mediapipe/tasks-vision')
+  const wasmPath = new URL(`${import.meta.env.BASE_URL}mediapipe-wasm`, globalThis.location.origin).href.replace(/\/$/, '')
+  const resolveVision = FilesetResolver.forVisionTasks as unknown as (path: string, useModuleLoader?: boolean) => Promise<{ wasmLoaderPath: string; [key: string]: unknown }>
+  return resolveVision(wasmPath, true)
+}
+
 async function getObjectDetector() {
   objectDetectorPromise ??= (async () => {
-    const { FilesetResolver, ObjectDetector } = await import('@mediapipe/tasks-vision')
-    const wasmPath = new URL(`${import.meta.env.BASE_URL}mediapipe-wasm`, globalThis.location.origin).href.replace(/\/$/, '')
-    const resolveVision = FilesetResolver.forVisionTasks as unknown as (path: string, useModuleLoader?: boolean) => Promise<{ wasmLoaderPath: string; [key: string]: unknown }>
-    const fileset = await resolveVision(wasmPath, true)
+    const { ObjectDetector } = await import('@mediapipe/tasks-vision')
+    const fileset = await getVisionFileset()
     const modelUrl = new URL(`${import.meta.env.BASE_URL}models/efficientdet_lite0.tflite`, globalThis.location.origin).href
     const response = await fetch(modelUrl)
     if (!response.ok) throw new Error(`Unable to load object detection model (${response.status})`)
@@ -71,6 +79,27 @@ async function getObjectDetector() {
     throw error
   })
   return objectDetectorPromise
+}
+
+async function getFaceDetector() {
+  faceDetectorPromise ??= (async () => {
+    const { FaceDetector } = await import('@mediapipe/tasks-vision')
+    const fileset = await getVisionFileset()
+    const modelUrl = new URL(`${import.meta.env.BASE_URL}models/blaze_face_short_range.tflite`, globalThis.location.origin).href
+    const response = await fetch(modelUrl)
+    if (!response.ok) throw new Error(`Unable to load face detection model (${response.status})`)
+    const modelAssetBuffer = new Uint8Array(await response.arrayBuffer())
+    return FaceDetector.createFromOptions(fileset as never, {
+      baseOptions: { modelAssetBuffer, delegate: 'CPU' },
+      runningMode: 'IMAGE',
+      minDetectionConfidence: MEDIAPIPE_FACE_SCORE_THRESHOLD,
+      minSuppressionThreshold: 0.3,
+    } as never)
+  })().catch((error) => {
+    faceDetectorPromise = undefined
+    throw error
+  })
+  return faceDetectorPromise
 }
 
 function iou(a: FocusRegion, b: FocusRegion) {
@@ -106,6 +135,37 @@ function sourceCanvas(rgba: Uint8ClampedArray, width: number, height: number) {
   if (!ctx) return undefined
   ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), width, height), 0, 0)
   return canvas
+}
+
+async function detectMediaPipeFaceRegions(rgba: Uint8ClampedArray, width: number, height: number): Promise<FocusRegion[]> {
+  const canvas = sourceCanvas(rgba, width, height)
+  if (!canvas) return []
+  const detector = await getFaceDetector()
+  const result = detector.detect(canvas as never)
+  const regions: FocusRegion[] = []
+
+  for (const detection of result.detections ?? []) {
+    const box = detection.boundingBox
+    const category = detection.categories?.[0]
+    if (!box) continue
+    const confidence = category?.score ?? 0
+    const x = Math.max(0, Math.min(1, box.originX / width))
+    const y = Math.max(0, Math.min(1, box.originY / height))
+    const boxWidth = Math.max(0, Math.min(1 - x, box.width / width))
+    const boxHeight = Math.max(0, Math.min(1 - y, box.height / height))
+    if (!validFaceBox(x, y, x + boxWidth, y + boxHeight)) continue
+    regions.push({
+      x,
+      y,
+      width: boxWidth,
+      height: boxHeight,
+      confidence,
+      kind: 'face',
+      label: 'face',
+    })
+  }
+
+  return nms(regions)
 }
 
 async function detectFaceRegions(
@@ -323,15 +383,21 @@ async function detectFacesInsidePersonHead(
 }
 
 export async function detectFaces(rgba: Uint8ClampedArray, width: number, height: number): Promise<FocusRegion[]> {
-  let weakFace: FocusRegion | undefined
+  try {
+    const mediaPipeFaces = await detectMediaPipeFaceRegions(rgba, width, height)
+    if (mediaPipeFaces.length) return mediaPipeFaces
+  } catch (error) {
+    console.warn('MediaPipe face detection failed; trying UltraFace fallback.', error)
+  }
 
+  let weakFace: FocusRegion | undefined
   try {
     const faces = await detectFaceRegions(rgba, width, height)
     const strongFaces = faces.filter((face) => face.confidence >= SCORE_THRESHOLD)
     if (strongFaces.length) return strongFaces
     weakFace = faces[0]
   } catch (error) {
-    console.warn('Face detection failed; trying AI object focus fallback.', error)
+    console.warn('UltraFace detection failed; trying AI object focus fallback.', error)
   }
 
   try {
