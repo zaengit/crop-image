@@ -71,8 +71,6 @@ export function FocusEditor({ sourceUrl, focus, previewFilter, onFocusChange, on
     left: `${imageBox.left + focus.x * imageBox.width}px`,
     top: `${imageBox.top + focus.y * imageBox.height}px`,
   }
-  const displayX = Math.round(focus.x * imageBox.width)
-  const displayY = Math.round(focus.y * imageBox.height)
 
   return (
     <section id="focus-editor" className="grid gap-5 rounded-[28px] border border-neutral-200 bg-white p-5 shadow-[0_20px_55px_rgba(15,23,42,0.06)] sm:p-6 lg:grid-cols-[minmax(250px,0.36fr)_1fr]">
@@ -110,14 +108,6 @@ export function FocusEditor({ sourceUrl, focus, previewFilter, onFocusChange, on
         <div className="pointer-events-none absolute left-3 top-3 z-10 flex items-center gap-2 rounded-full border border-neutral-200 bg-white/90 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-600 shadow-sm backdrop-blur sm:left-4 sm:top-4">
           <span className="h-1.5 w-1.5 rounded-full bg-neutral-950" aria-hidden="true" />
           {autoFocusActive ? 'Auto focus' : 'Manual focus'}
-        </div>
-        <div
-          id="focus-debug-coordinate"
-          className="pointer-events-none absolute bottom-3 left-3 z-20 rounded-xl border border-neutral-800 bg-neutral-950/90 px-3 py-2 font-mono text-[11px] leading-5 text-white shadow-lg backdrop-blur sm:bottom-4 sm:left-4"
-          aria-live="polite"
-        >
-          <div>x: {focus.x.toFixed(4)} · y: {focus.y.toFixed(4)}</div>
-          <div>view: {displayX}px · {displayY}px</div>
         </div>
         <img
           ref={imageRef}
